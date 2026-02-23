@@ -1,12 +1,19 @@
-//! sculk-cli: P2P 安全隧道的命令行入口
+//! sculk CLI
 //!
-//! 提供 `host` 和 `join` 子命令，分别用于创建和加入房间。
+//! 用法:
+//! - `sculk host` — 创建房间，获得票据
+//! - `sculk join <ticket>` — 用票据加入房间
 
 use clap::{Parser, Subcommand};
+use sculk_core::tunnel::IrohTunnel;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "sculk", version, about = "P2P 安全隧道 CLI")]
+#[command(
+    name = "sculk",
+    version,
+    about = "P2P tunnel for Minecraft multiplayer"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -14,17 +21,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 创建房间，将本地 MC 服务端暴露到隧道
+    /// Start hosting and expose local MC server
     Host {
-        /// 本地 MC 端口
+        /// Local Minecraft server port
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_MC_PORT)]
         port: u16,
     },
-    /// 通过票据加入远程服务器
+    /// Join a hosted room via ticket
     Join {
-        /// 房主提供的连接票据
+        /// Ticket from the host
         ticket: String,
-        /// 本地监听端口
+        /// Local port for MC client to connect
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_INLET_PORT)]
         port: u16,
     },
@@ -40,10 +47,19 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Host { port } => {
-            println!("TODO: host on MC port {port}");
+            let (tunnel, ticket) = IrohTunnel::host(port).await?;
+            println!("Ticket: {ticket}");
+            println!("Share this ticket with players.");
+            println!("Press Ctrl+C to stop.");
+            tokio::signal::ctrl_c().await?;
+            tunnel.close().await;
         }
         Commands::Join { ticket, port } => {
-            println!("TODO: join with ticket {ticket}, local port {port}");
+            let tunnel = IrohTunnel::join(&ticket, port).await?;
+            println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
+            println!("Press Ctrl+C to stop.");
+            tokio::signal::ctrl_c().await?;
+            tunnel.close().await;
         }
     }
 
