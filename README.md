@@ -15,6 +15,20 @@ graph LR
     Outlet -->|转发| Server[MC 服务端]
 ```
 
+## 安装
+
+**macOS / Linux:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/install/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/install/install.ps1 | iex
+```
+
 ## 使用
 
 ```sh
@@ -31,6 +45,20 @@ sculk join xxxxx -p 30000
 ```sh
 cargo build
 cargo test
+```
+
+## 卸载
+
+**macOS / Linux:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/uninstall/uninstall.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/uninstall/uninstall.ps1 | iex
 ```
 
 ## License

@@ -19,7 +19,7 @@ jobs:
             runner: ubuntu-latest
             artifact: sculk-linux-amd64
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
             artifact: sculk-darwin-amd64
           - target: aarch64-apple-darwin
             runner: macos-latest
