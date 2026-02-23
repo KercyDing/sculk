@@ -1,6 +1,11 @@
-[package]
-name = "sculk"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["core", "cli"]
+resolver = "3"
 
-[dependencies]
+[workspace.dependencies]
+anyhow = "1.0.102"
+iroh = "0.96.1"
+tokio = { version = "1.49.0", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+clap = { version = "4.5.60", features = ["derive"] }
