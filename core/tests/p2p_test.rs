@@ -25,6 +25,7 @@ async fn echo_server(listener: TcpListener) {
 }
 
 #[tokio::test]
+#[ignore] // 需要真实网络（iroh relay），CI 中跳过
 async fn tunnel_echo_roundtrip() {
     // 1. 启动 echo server（模拟 MC 服务端）
     let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -47,9 +48,7 @@ async fn tunnel_echo_roundtrip() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     // 4. 模拟 MC 客户端连接
-    let mut client = TcpStream::connect(("127.0.0.1", local_port))
-        .await
-        .unwrap();
+    let mut client = TcpStream::connect(("127.0.0.1", local_port)).await.unwrap();
 
     // 5. 发送数据，验证 echo 回来
     let messages = ["hello", "minecraft", "sculk tunnel works!"];
