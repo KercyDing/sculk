@@ -1,8 +1,10 @@
 //! `sculk://` 票据格式的编解码。
 //!
 //! 票据格式:
-//! - `sculk://<EndpointId>?relay=<RelayUrl>` — 自定义 relay
-//! - `sculk://<EndpointId>` — 默认 n0 relay
+//! - `"sculk://<EndpointId>?relay=<RelayUrl>"` — 自定义 relay
+//! - `"sculk://<EndpointId>"` — 默认 n0 relay
+//!
+//! 注意: shell 中使用时需要用引号包裹，因为 `?` 会被 zsh 等 shell 解释为通配符。
 
 use std::fmt;
 use std::str::FromStr;

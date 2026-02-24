@@ -2,7 +2,7 @@
 //!
 //! Usage:
 //! - `sculk host` — create a room and get a ticket
-//! - `sculk join <ticket>` — join a room via ticket
+//! - `sculk join "<ticket>"` — join a room via ticket (quote the ticket!)
 //! - `sculk relay` — manage custom relay server
 
 mod key;
@@ -93,9 +93,10 @@ async fn main() -> anyhow::Result<()> {
             let (tunnel, ticket, mut events) =
                 IrohTunnel::host(port, Some(secret_key), relay_url).await?;
             let ticket_str = ticket.to_string();
-            println!("Ticket: {ticket_str}");
+            let quoted = format!("\"{ticket_str}\"");
+            println!("Ticket: {quoted}");
 
-            if let Ok(()) = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&ticket_str)) {
+            if let Ok(()) = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&quoted)) {
                 println!("(Copied to clipboard)");
             }
 
