@@ -5,6 +5,6 @@
 mod event;
 mod iroh;
 
-pub use ::iroh::SecretKey;
+pub use ::iroh::{RelayUrl, SecretKey};
 pub use event::{ConnectionSnapshot, TunnelEvent};
 pub use iroh::IrohTunnel;

@@ -25,7 +25,7 @@
 use std::sync::{Arc, Mutex};
 
 use iroh::endpoint::{Connection, ConnectionInfo, PathInfoList, RecvStream, SendStream};
-use iroh::{Endpoint, EndpointId, SecretKey, Watcher};
+use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -49,14 +49,14 @@ impl IrohTunnel {
     ///
     /// 票据为 EndpointId 字符串，玩家可通过 n0 DNS 发现房主地址。
     /// 传入 `secret_key` 可使 ticket 跨重启保持稳定；传 `None` 则自动生成新密钥。
+    /// 传入 `relay_url` 可使用自定义 relay 服务器；传 `None` 则使用默认 n0 节点。
     pub async fn host(
         mc_port: u16,
         secret_key: Option<SecretKey>,
+        relay_url: Option<RelayUrl>,
     ) -> anyhow::Result<(Self, String, mpsc::Receiver<TunnelEvent>)> {
-        let mut builder = Endpoint::builder().alpns(vec![ALPN.to_vec()]);
-        if let Some(key) = secret_key {
-            builder = builder.secret_key(key);
-        }
+        let mut builder = build_endpoint(secret_key, relay_url.as_ref());
+        builder = builder.alpns(vec![ALPN.to_vec()]);
         let endpoint = builder.bind().await?;
 
         // 等待连上 Relay，确保地址可被发现
@@ -82,15 +82,18 @@ impl IrohTunnel {
     }
 
     /// 玩家: 通过票据连接房主，返回事件接收端。
+    ///
+    /// 传入 `relay_url` 可使用自定义 relay 服务器；传 `None` 则使用默认 n0 节点。
     pub async fn join(
         ticket: &str,
         local_port: u16,
+        relay_url: Option<RelayUrl>,
     ) -> anyhow::Result<(Self, mpsc::Receiver<TunnelEvent>)> {
         let endpoint_id: EndpointId = ticket
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid ticket: {e}"))?;
 
-        let endpoint = Endpoint::builder().bind().await?;
+        let endpoint = build_endpoint(None, relay_url.as_ref()).bind().await?;
 
         tracing::info!("connecting to host...");
         let conn = endpoint.connect(endpoint_id, ALPN).await?;
@@ -326,4 +329,20 @@ async fn bridge(mut send: SendStream, mut recv: RecvStream, tcp: TcpStream) -> a
     }
 
     Ok(())
+}
+
+/// 构建 Endpoint builder，根据参数配置 secret key 和 relay 模式
+fn build_endpoint(
+    secret_key: Option<SecretKey>,
+    relay_url: Option<&RelayUrl>,
+) -> iroh::endpoint::Builder {
+    let mut builder = Endpoint::builder();
+    if let Some(key) = secret_key {
+        builder = builder.secret_key(key);
+    }
+    if let Some(url) = relay_url {
+        let relay_map = RelayMap::from(url.clone());
+        builder = builder.relay_mode(RelayMode::Custom(relay_map));
+    }
+    builder
 }

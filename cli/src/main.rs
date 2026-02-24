@@ -1,22 +1,25 @@
 //! sculk CLI
 //!
-//! 用法:
-//! - `sculk host` — 创建房间，获得票据
-//! - `sculk join <ticket>` — 用票据加入房间
+//! Usage:
+//! - `sculk host` — create a room and get a ticket
+//! - `sculk join <ticket>` — join a room via ticket
+//! - `sculk relay` — manage custom relay server
 
 mod key;
+mod relay;
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
-use sculk_core::tunnel::{IrohTunnel, TunnelEvent};
+use clap::{CommandFactory, Parser, Subcommand};
+use sculk_core::tunnel::{IrohTunnel, RelayUrl, TunnelEvent};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(
     name = "sculk",
     version,
-    about = "P2P tunnel for Minecraft multiplayer"
+    about = "P2P tunnel for Minecraft multiplayer",
+    arg_required_else_help = true
 )]
 struct Cli {
     #[command(subcommand)]
@@ -36,6 +39,9 @@ enum Commands {
         /// Custom secret key file path
         #[arg(long)]
         key_path: Option<PathBuf>,
+        /// Override relay server URL (takes precedence over config)
+        #[arg(short, long)]
+        relay: Option<String>,
     },
     /// Join a hosted room via ticket
     Join {
@@ -44,6 +50,21 @@ enum Commands {
         /// Local port for MC client to connect
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_INLET_PORT)]
         port: u16,
+        /// Override relay server URL (takes precedence over config)
+        #[arg(short, long)]
+        relay: Option<String>,
+    },
+    /// Manage custom relay server configuration
+    Relay {
+        /// Set custom relay server URL
+        #[arg(long)]
+        url: Option<String>,
+        /// Show current relay configuration
+        #[arg(long)]
+        list: bool,
+        /// Reset to default n0 relay servers
+        #[arg(long)]
+        reset: bool,
     },
 }
 
@@ -60,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
             port,
             new_key,
             key_path,
+            relay,
         } => {
             let path = key_path.unwrap_or_else(default_key_path);
             let secret_key = if new_key {
@@ -69,7 +91,13 @@ async fn main() -> anyhow::Result<()> {
             };
             tracing::info!(key_path = %path.display(), "using secret key");
 
-            let (tunnel, ticket, mut events) = IrohTunnel::host(port, Some(secret_key)).await?;
+            let relay_url = resolve_relay_url(relay.as_deref())?;
+            if let Some(ref url) = relay_url {
+                println!("Relay: {url}");
+            }
+
+            let (tunnel, ticket, mut events) =
+                IrohTunnel::host(port, Some(secret_key), relay_url).await?;
             println!("Ticket: {ticket}");
             println!("Share this ticket with players.");
             println!("Press Ctrl+C to stop.");
@@ -83,8 +111,17 @@ async fn main() -> anyhow::Result<()> {
             tokio::signal::ctrl_c().await?;
             tunnel.close().await;
         }
-        Commands::Join { ticket, port } => {
-            let (tunnel, mut events) = IrohTunnel::join(&ticket, port).await?;
+        Commands::Join {
+            ticket,
+            port,
+            relay,
+        } => {
+            let relay_url = resolve_relay_url(relay.as_deref())?;
+            if let Some(ref url) = relay_url {
+                println!("Relay: {url}");
+            }
+
+            let (tunnel, mut events) = IrohTunnel::join(&ticket, port, relay_url).await?;
             println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
             println!("Press Ctrl+C to stop.");
 
@@ -97,6 +134,27 @@ async fn main() -> anyhow::Result<()> {
             tokio::signal::ctrl_c().await?;
             tunnel.close().await;
         }
+        Commands::Relay { url, list, reset } => {
+            let conf = default_relay_conf_path();
+            if reset {
+                relay::remove_relay_config(&conf)?;
+                println!("Reset to default n0 relay servers.");
+            } else if let Some(url) = url {
+                relay::save_relay_url(&conf, &url)?;
+                println!("Custom relay saved: {url}");
+            } else if list {
+                match relay::load_relay_url(&conf)? {
+                    Some(url) => println!("Current relay: {url}"),
+                    None => println!("Using default n0 relay servers."),
+                }
+            } else {
+                Cli::command()
+                    .find_subcommand("relay")
+                    .unwrap()
+                    .clone()
+                    .print_help()?;
+            }
+        }
     }
 
     Ok(())
@@ -104,9 +162,27 @@ async fn main() -> anyhow::Result<()> {
 
 fn default_key_path() -> PathBuf {
     dirs::data_dir()
-        .expect("无法获取系统数据目录")
+        .expect("cannot determine system data directory")
         .join("sculk")
         .join("secret.key")
+}
+
+fn default_relay_conf_path() -> PathBuf {
+    dirs::data_dir()
+        .expect("cannot determine system data directory")
+        .join("sculk")
+        .join("relay.conf")
+}
+
+/// Resolve relay URL: --relay flag > config file > None (default n0)
+fn resolve_relay_url(flag: Option<&str>) -> anyhow::Result<Option<RelayUrl>> {
+    if let Some(url_str) = flag {
+        let url: RelayUrl = url_str
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid relay URL: {e}"))?;
+        return Ok(Some(url));
+    }
+    relay::load_relay_url(&default_relay_conf_path())
 }
 
 fn print_event(event: &TunnelEvent) {
