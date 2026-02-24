@@ -24,7 +24,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use iroh::endpoint::{Connection, ConnectionInfo, RecvStream, SendStream};
+use iroh::endpoint::{Connection, ConnectionInfo, PathInfoList, RecvStream, SendStream};
 use iroh::{Endpoint, EndpointId, SecretKey, Watcher};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -285,24 +285,30 @@ async fn join_accept_loop(conn: Connection, listener: TcpListener) -> anyhow::Re
 fn spawn_path_monitor(conn: Connection, remote_id: String, tx: mpsc::Sender<TunnelEvent>) {
     tokio::spawn(async move {
         let mut watcher = conn.paths();
+
+        // 发送初始路径状态
+        send_path_event(&watcher.get(), &remote_id, &tx).await;
+
         loop {
             // 等待路径变化
             if watcher.updated().await.is_err() {
                 break; // watcher disconnected（连接已关闭）
             }
-            let paths = watcher.get();
-            // 找到当前选中的路径
-            if let Some(selected) = paths.iter().find(|p| p.is_selected()) {
-                let _ = tx
-                    .send(TunnelEvent::PathChanged {
-                        remote_id: remote_id.clone(),
-                        is_relay: selected.is_relay(),
-                        rtt_ms: selected.rtt().as_millis() as u64,
-                    })
-                    .await;
-            }
+            send_path_event(&watcher.get(), &remote_id, &tx).await;
         }
     });
+}
+
+async fn send_path_event(paths: &PathInfoList, remote_id: &str, tx: &mpsc::Sender<TunnelEvent>) {
+    if let Some(selected) = paths.iter().find(|p| p.is_selected()) {
+        let _ = tx
+            .send(TunnelEvent::PathChanged {
+                remote_id: remote_id.to_string(),
+                is_relay: selected.is_relay(),
+                rtt_ms: selected.rtt().as_millis() as u64,
+            })
+            .await;
+    }
 }
 
 /// 双向桥接：双向流 <-> TCP，任一方向断开则关闭

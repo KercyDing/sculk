@@ -80,6 +80,30 @@ curl -fsSL https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/script
 irm https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/uninstall/uninstall.ps1 | iex
 ```
 
+## 网络说明
+
+sculk 优先通过 NAT 打洞建立直连（低延迟），打洞失败时回退到 iroh relay 中继（延迟较高）。
+
+**NAT 类型与打洞成功率：**
+
+| 组合 | 打洞 | 说明 |
+|------|------|------|
+| Cone + Cone | 成功 | 最佳情况，直连低延迟 |
+| Cone + Symmetric | 可能 | 取决于具体实现 |
+| Symmetric + Symmetric | 失败 | 只能走 relay 中继 |
+
+可通过 `iroh doctor report` 检测 NAT 类型，关注 `mapping_varies_by_dest_ip` 字段：
+- `Some(false)` — Cone NAT，打洞友好
+- `Some(true)` — Symmetric NAT，打洞困难
+- `None` — 检测失败（可能受代理干扰）
+
+**代理用户注意：** TUN/虚拟网卡模式会劫持 UDP 流量，导致打洞失败和 STUN 检测异常。建议关闭 TUN 或将 `*.relay.iroh.network` 加入直连规则。系统代理（HTTP/SOCKS）不影响。
+
+**建议网络环境：**
+- 优先使用家用宽带 WiFi（通常是 Cone NAT，打洞成功率高）
+- 避免使用手机热点（运营商几乎都是 Symmetric NAT，无法打洞）
+- 双方都有 IPv6 时打洞成功率更高
+
 ## License
 
 [GPL-3.0](LICENSE)
