@@ -5,7 +5,7 @@
 //! - `sculk join <ticket>` — 用票据加入房间
 
 use clap::{Parser, Subcommand};
-use sculk_core::tunnel::IrohTunnel;
+use sculk_core::tunnel::{IrohTunnel, TunnelEvent};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -47,21 +47,53 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Host { port } => {
-            let (tunnel, ticket) = IrohTunnel::host(port).await?;
+            let (tunnel, ticket, mut events) = IrohTunnel::host(port).await?;
             println!("Ticket: {ticket}");
             println!("Share this ticket with players.");
             println!("Press Ctrl+C to stop.");
+
+            tokio::spawn(async move {
+                while let Some(event) = events.recv().await {
+                    print_event(&event);
+                }
+            });
+
             tokio::signal::ctrl_c().await?;
             tunnel.close().await;
         }
         Commands::Join { ticket, port } => {
-            let tunnel = IrohTunnel::join(&ticket, port).await?;
+            let (tunnel, mut events) = IrohTunnel::join(&ticket, port).await?;
             println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
             println!("Press Ctrl+C to stop.");
+
+            tokio::spawn(async move {
+                while let Some(event) = events.recv().await {
+                    print_event(&event);
+                }
+            });
+
             tokio::signal::ctrl_c().await?;
             tunnel.close().await;
         }
     }
 
     Ok(())
+}
+
+fn print_event(event: &TunnelEvent) {
+    match event {
+        TunnelEvent::PlayerJoined { id } => println!("[+] Player joined: {id}"),
+        TunnelEvent::PlayerLeft { id, reason } => println!("[-] Player left: {id} ({reason})"),
+        TunnelEvent::Connected => println!("[*] Connected to host"),
+        TunnelEvent::Disconnected { reason } => println!("[!] Disconnected: {reason}"),
+        TunnelEvent::PathChanged {
+            remote_id,
+            is_relay,
+            rtt_ms,
+        } => {
+            let mode = if *is_relay { "relay" } else { "direct" };
+            println!("[~] {remote_id} path: {mode}, RTT: {rtt_ms}ms");
+        }
+        TunnelEvent::Error { message } => eprintln!("[!] Error: {message}"),
+    }
 }

@@ -6,6 +6,8 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use sculk_core::tunnel::TunnelEvent;
+
 /// 启动一个简单的 TCP echo server，收到什么就回什么
 async fn echo_server(listener: TcpListener) {
     loop {
@@ -33,16 +35,31 @@ async fn tunnel_echo_roundtrip() {
     tokio::spawn(echo_server(echo_listener));
 
     // 2. Host: 创建隧道
-    let (host_tunnel, ticket) = sculk_core::tunnel::IrohTunnel::host(mc_port).await.unwrap();
+    let (host_tunnel, ticket, mut host_events) =
+        sculk_core::tunnel::IrohTunnel::host(mc_port).await.unwrap();
 
     // 3. Join: 用票据连接，监听随机端口
     let join_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_port = join_listener.local_addr().unwrap().port();
     drop(join_listener); // 释放端口给 IrohTunnel::join 使用
 
-    let join_tunnel = sculk_core::tunnel::IrohTunnel::join(&ticket, local_port)
+    let (join_tunnel, mut join_events) = sculk_core::tunnel::IrohTunnel::join(&ticket, local_port)
         .await
         .unwrap();
+
+    // 验证 join 端收到 Connected 事件
+    let event = tokio::time::timeout(Duration::from_secs(5), join_events.recv())
+        .await
+        .expect("timeout waiting for Connected event")
+        .expect("channel closed");
+    assert!(matches!(event, TunnelEvent::Connected));
+
+    // 验证 host 端收到 PlayerJoined 事件
+    let event = tokio::time::timeout(Duration::from_secs(5), host_events.recv())
+        .await
+        .expect("timeout waiting for PlayerJoined event")
+        .expect("channel closed");
+    assert!(matches!(event, TunnelEvent::PlayerJoined { .. }));
 
     // 等待隧道就绪
     tokio::time::sleep(Duration::from_secs(1)).await;

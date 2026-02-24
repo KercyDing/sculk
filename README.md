@@ -40,11 +40,23 @@ sculk host -p 25565
 sculk join xxxxx -p 30000
 ```
 
-## 构建
+## 开发
+
+需要安装 [just](https://github.com/casey/just) 命令运行器和 [nextest](https://nexte.st) 测试框架：
 
 ```sh
-cargo build
-cargo test
+cargo install just just-lsp
+cargo install cargo-nextest --locked
+```
+
+常用命令：
+
+```sh
+just host              # 房主：创建房间（默认 25565）
+just join <ticket>     # 玩家：加入房间（默认 30000）
+just check             # fmt + check + clippy
+just test              # 运行测试
+just fmt               # 格式化代码
 ```
 
 ## 卸载

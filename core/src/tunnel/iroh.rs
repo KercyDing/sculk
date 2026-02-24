@@ -22,24 +22,33 @@
 //! - **Host**: 启动 Endpoint 等待连接，每收到一条双向流就桥接到本地 MC 服务端
 //! - **Client**: 连接 Host，本地开放端口，MC 每次连入就开一条新的双向流转发
 
-use iroh::endpoint::{Connection, RecvStream, SendStream};
-use iroh::{Endpoint, EndpointId};
+use std::sync::{Arc, Mutex};
 
+use iroh::endpoint::{Connection, ConnectionInfo, RecvStream, SendStream};
+use iroh::{Endpoint, EndpointId, Watcher};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
+
+use super::event::{ConnectionSnapshot, TunnelEvent};
 
 /// sculk 隧道协议标识
 const ALPN: &[u8] = b"/sculk/tunnel/1";
 
+/// 事件通道缓冲区大小
+const EVENT_CHANNEL_SIZE: usize = 64;
+
 /// 基于 iroh 的 P2P 隧道
 pub struct IrohTunnel {
     endpoint: Endpoint,
+    /// 活跃连接列表（ConnectionInfo 是弱引用，不阻止连接释放）
+    conns: Arc<Mutex<Vec<ConnectionInfo>>>,
 }
 
 impl IrohTunnel {
-    /// 房主: 创建隧道，返回连接票据供玩家使用。
+    /// 房主: 创建隧道，返回连接票据和事件接收端。
     ///
     /// 票据为 EndpointId 字符串，玩家可通过 n0 DNS 发现房主地址。
-    pub async fn host(mc_port: u16) -> anyhow::Result<(Self, String)> {
+    pub async fn host(mc_port: u16) -> anyhow::Result<(Self, String, mpsc::Receiver<TunnelEvent>)> {
         let endpoint = Endpoint::builder()
             .alpns(vec![ALPN.to_vec()])
             .bind()
@@ -49,19 +58,29 @@ impl IrohTunnel {
         endpoint.online().await;
 
         let ticket = endpoint.id().to_string();
+        let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
+        let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
 
         let ep = endpoint.clone();
+        let conns_clone = conns.clone();
         tokio::spawn(async move {
-            if let Err(e) = host_accept_loop(ep, mc_port).await {
-                tracing::error!("host loop ended: {e}");
+            if let Err(e) = host_accept_loop(ep, mc_port, tx.clone(), conns_clone).await {
+                let _ = tx
+                    .send(TunnelEvent::Error {
+                        message: format!("host loop ended: {e}"),
+                    })
+                    .await;
             }
         });
 
-        Ok((Self { endpoint }, ticket))
+        Ok((Self { endpoint, conns }, ticket, rx))
     }
 
-    /// 玩家: 通过票据连接房主，在本地端口监听。
-    pub async fn join(ticket: &str, local_port: u16) -> anyhow::Result<Self> {
+    /// 玩家: 通过票据连接房主，返回事件接收端。
+    pub async fn join(
+        ticket: &str,
+        local_port: u16,
+    ) -> anyhow::Result<(Self, mpsc::Receiver<TunnelEvent>)> {
         let endpoint_id: EndpointId = ticket
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid ticket: {e}"))?;
@@ -72,16 +91,87 @@ impl IrohTunnel {
         let conn = endpoint.connect(endpoint_id, ALPN).await?;
         tracing::info!("connected to host");
 
+        let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
+        let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
+
+        // 保存连接信息
+        let conn_info = conn.to_info();
+        conns.lock().unwrap().push(conn_info.clone());
+
+        let _ = tx.send(TunnelEvent::Connected).await;
+
+        // 监控路径变化
+        let remote_id = conn.remote_id().fmt_short().to_string();
+        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone());
+
+        // 监控断开
+        let tx_dc = tx.clone();
+        tokio::spawn(async move {
+            if let Some((err, _stats)) = conn_info.closed().await {
+                let _ = tx_dc
+                    .send(TunnelEvent::Disconnected {
+                        reason: err.to_string(),
+                    })
+                    .await;
+            }
+        });
+
         let listener = TcpListener::bind(("127.0.0.1", local_port)).await?;
         tracing::info!(local_port, "listening for MC clients");
 
         tokio::spawn(async move {
             if let Err(e) = join_accept_loop(conn, listener).await {
-                tracing::error!("join loop ended: {e}");
+                let _ = tx
+                    .send(TunnelEvent::Error {
+                        message: format!("join loop ended: {e}"),
+                    })
+                    .await;
             }
         });
 
-        Ok(Self { endpoint })
+        Ok((Self { endpoint, conns }, rx))
+    }
+
+    /// 获取连接信息快照
+    ///
+    /// host 端返回所有玩家，join 端返回房主信息。
+    /// 已断开的连接会被自动清理。
+    pub fn connections(&self) -> Vec<ConnectionSnapshot> {
+        let mut guard = self.conns.lock().unwrap();
+        // 清理已断开的连接
+        guard.retain(|c| c.is_alive());
+
+        guard
+            .iter()
+            .map(|info| {
+                let path = info.selected_path();
+                let (is_relay, rtt_ms, tx_bytes, rx_bytes) = match &path {
+                    Some(p) => {
+                        let stats = p.stats();
+                        (
+                            p.is_relay(),
+                            stats.rtt.as_millis() as u64,
+                            stats.udp_tx.bytes,
+                            stats.udp_rx.bytes,
+                        )
+                    }
+                    None => (false, 0, 0, 0),
+                };
+                ConnectionSnapshot {
+                    remote_id: info.remote_id().fmt_short().to_string(),
+                    is_relay,
+                    rtt_ms,
+                    tx_bytes,
+                    rx_bytes,
+                    alive: info.is_alive(),
+                }
+            })
+            .collect()
+    }
+
+    /// 获取本机 EndpointId
+    pub fn local_id(&self) -> String {
+        self.endpoint.id().to_string()
     }
 
     /// 关闭隧道
@@ -90,8 +180,13 @@ impl IrohTunnel {
     }
 }
 
-/// Host: 持续接受 QUIC 连接
-async fn host_accept_loop(endpoint: Endpoint, mc_port: u16) -> anyhow::Result<()> {
+/// Host: 持续接受 QUIC 连接，发送事件并管理连接列表
+async fn host_accept_loop(
+    endpoint: Endpoint,
+    mc_port: u16,
+    tx: mpsc::Sender<TunnelEvent>,
+    conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+) -> anyhow::Result<()> {
     loop {
         let conn = endpoint
             .accept()
@@ -99,7 +194,35 @@ async fn host_accept_loop(endpoint: Endpoint, mc_port: u16) -> anyhow::Result<()
             .ok_or_else(|| anyhow::anyhow!("endpoint closed"))?
             .await?;
 
-        tracing::info!(remote = %conn.remote_id().fmt_short(), "player connected");
+        let remote_id = conn.remote_id().fmt_short().to_string();
+        tracing::info!(remote = %remote_id, "player connected");
+
+        // 保存连接信息
+        let conn_info = conn.to_info();
+        conns.lock().unwrap().push(conn_info.clone());
+
+        let _ = tx
+            .send(TunnelEvent::PlayerJoined {
+                id: remote_id.clone(),
+            })
+            .await;
+
+        // 监控路径变化
+        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone());
+
+        // 监控断开
+        let tx_left = tx.clone();
+        let left_id = remote_id.clone();
+        tokio::spawn(async move {
+            if let Some((err, _stats)) = conn_info.closed().await {
+                let _ = tx_left
+                    .send(TunnelEvent::PlayerLeft {
+                        id: left_id,
+                        reason: err.to_string(),
+                    })
+                    .await;
+            }
+        });
 
         tokio::spawn(async move {
             if let Err(e) = host_handle_conn(conn, mc_port).await {
@@ -151,6 +274,30 @@ async fn join_accept_loop(conn: Connection, listener: TcpListener) -> anyhow::Re
             }
         });
     }
+}
+
+/// 监控连接路径变化，发送 PathChanged 事件
+fn spawn_path_monitor(conn: Connection, remote_id: String, tx: mpsc::Sender<TunnelEvent>) {
+    tokio::spawn(async move {
+        let mut watcher = conn.paths();
+        loop {
+            // 等待路径变化
+            if watcher.updated().await.is_err() {
+                break; // watcher disconnected（连接已关闭）
+            }
+            let paths = watcher.get();
+            // 找到当前选中的路径
+            if let Some(selected) = paths.iter().find(|p| p.is_selected()) {
+                let _ = tx
+                    .send(TunnelEvent::PathChanged {
+                        remote_id: remote_id.clone(),
+                        is_relay: selected.is_relay(),
+                        rtt_ms: selected.rtt().as_millis() as u64,
+                    })
+                    .await;
+            }
+        }
+    });
 }
 
 /// 双向桥接：双向流 <-> TCP，任一方向断开则关闭
