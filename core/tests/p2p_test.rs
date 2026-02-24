@@ -45,10 +45,9 @@ async fn tunnel_echo_roundtrip() {
     let local_port = join_listener.local_addr().unwrap().port();
     drop(join_listener); // 释放端口给 IrohTunnel::join 使用
 
-    let (join_tunnel, mut join_events) =
-        sculk_core::tunnel::IrohTunnel::join(&ticket, local_port, None)
-            .await
-            .unwrap();
+    let (join_tunnel, mut join_events) = sculk_core::tunnel::IrohTunnel::join(&ticket, local_port)
+        .await
+        .unwrap();
 
     // 验证 join 端收到 Connected 事件
     let event = tokio::time::timeout(Duration::from_secs(5), join_events.recv())

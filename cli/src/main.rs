@@ -50,9 +50,6 @@ enum Commands {
         /// Local port for MC client to connect
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_INLET_PORT)]
         port: u16,
-        /// Override relay server URL (takes precedence over config)
-        #[arg(short, long)]
-        relay: Option<String>,
     },
     /// Manage custom relay server configuration
     Relay {
@@ -92,13 +89,16 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!(key_path = %path.display(), "using secret key");
 
             let relay_url = resolve_relay_url(relay.as_deref())?;
-            if let Some(ref url) = relay_url {
-                println!("Relay: {url}");
-            }
 
             let (tunnel, ticket, mut events) =
                 IrohTunnel::host(port, Some(secret_key), relay_url).await?;
-            println!("Ticket: {ticket}");
+            let ticket_str = ticket.to_string();
+            println!("Ticket: {ticket_str}");
+
+            if let Ok(()) = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&ticket_str)) {
+                println!("(Copied to clipboard)");
+            }
+
             println!("Share this ticket with players.");
             println!("Press Ctrl+C to stop.");
 
@@ -111,17 +111,14 @@ async fn main() -> anyhow::Result<()> {
             tokio::signal::ctrl_c().await?;
             tunnel.close().await;
         }
-        Commands::Join {
-            ticket,
-            port,
-            relay,
-        } => {
-            let relay_url = resolve_relay_url(relay.as_deref())?;
-            if let Some(ref url) = relay_url {
+        Commands::Join { ticket, port } => {
+            let ticket: sculk_core::tunnel::Ticket =
+                ticket.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
+            if let Some(ref url) = ticket.relay_url {
                 println!("Relay: {url}");
             }
 
-            let (tunnel, mut events) = IrohTunnel::join(&ticket, port, relay_url).await?;
+            let (tunnel, mut events) = IrohTunnel::join(&ticket, port).await?;
             println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
             println!("Press Ctrl+C to stop.");
 

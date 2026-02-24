@@ -45,7 +45,10 @@ impl FromStr for Ticket {
         let url = url::Url::parse(s)?;
 
         if url.scheme() != SCHEME {
-            anyhow::bail!("invalid scheme: expected \"{SCHEME}\", got \"{}\"", url.scheme());
+            anyhow::bail!(
+                "invalid scheme: expected \"{SCHEME}\", got \"{}\"",
+                url.scheme()
+            );
         }
 
         let host = url

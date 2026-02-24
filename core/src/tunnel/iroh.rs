@@ -25,11 +25,12 @@
 use std::sync::{Arc, Mutex};
 
 use iroh::endpoint::{Connection, ConnectionInfo, PathInfoList, RecvStream, SendStream};
-use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher};
+use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
 use super::event::{ConnectionSnapshot, TunnelEvent};
+use super::ticket::Ticket;
 
 /// sculk 隧道协议标识
 const ALPN: &[u8] = b"/sculk/tunnel/1";
@@ -47,14 +48,14 @@ pub struct IrohTunnel {
 impl IrohTunnel {
     /// 房主: 创建隧道，返回连接票据和事件接收端。
     ///
-    /// 票据为 EndpointId 字符串，玩家可通过 n0 DNS 发现房主地址。
+    /// 票据为 `sculk://` URL，包含 EndpointId 和可选的 relay 地址。
     /// 传入 `secret_key` 可使 ticket 跨重启保持稳定；传 `None` 则自动生成新密钥。
     /// 传入 `relay_url` 可使用自定义 relay 服务器；传 `None` 则使用默认 n0 节点。
     pub async fn host(
         mc_port: u16,
         secret_key: Option<SecretKey>,
         relay_url: Option<RelayUrl>,
-    ) -> anyhow::Result<(Self, String, mpsc::Receiver<TunnelEvent>)> {
+    ) -> anyhow::Result<(Self, Ticket, mpsc::Receiver<TunnelEvent>)> {
         let mut builder = build_endpoint(secret_key, relay_url.as_ref());
         builder = builder.alpns(vec![ALPN.to_vec()]);
         let endpoint = builder.bind().await?;
@@ -62,7 +63,7 @@ impl IrohTunnel {
         // 等待连上 Relay，确保地址可被发现
         endpoint.online().await;
 
-        let ticket = endpoint.id().to_string();
+        let ticket = Ticket::new(endpoint.id(), relay_url);
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -83,20 +84,17 @@ impl IrohTunnel {
 
     /// 玩家: 通过票据连接房主，返回事件接收端。
     ///
-    /// 传入 `relay_url` 可使用自定义 relay 服务器；传 `None` 则使用默认 n0 节点。
+    /// 票据中包含目标节点 ID 和可选的 relay 地址，无需额外传入 relay 参数。
     pub async fn join(
-        ticket: &str,
+        ticket: &Ticket,
         local_port: u16,
-        relay_url: Option<RelayUrl>,
     ) -> anyhow::Result<(Self, mpsc::Receiver<TunnelEvent>)> {
-        let endpoint_id: EndpointId = ticket
-            .parse()
-            .map_err(|e| anyhow::anyhow!("invalid ticket: {e}"))?;
-
-        let endpoint = build_endpoint(None, relay_url.as_ref()).bind().await?;
+        let endpoint = build_endpoint(None, ticket.relay_url.as_ref())
+            .bind()
+            .await?;
 
         tracing::info!("connecting to host...");
-        let conn = endpoint.connect(endpoint_id, ALPN).await?;
+        let conn = endpoint.connect(ticket.endpoint_id, ALPN).await?;
         tracing::info!("connected to host");
 
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
