@@ -9,9 +9,10 @@ mod key;
 mod relay;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand};
-use sculk_core::tunnel::{IrohTunnel, RelayUrl, TunnelEvent};
+use sculk_core::tunnel::{IrohTunnel, RelayUrl, TunnelConfig, TunnelEvent};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -42,6 +43,9 @@ enum Commands {
         /// Override relay server URL (takes precedence over config)
         #[arg(short, long)]
         relay: Option<String>,
+        /// Path status print interval in seconds (0 = only on change)
+        #[arg(short, long, default_value_t = 0)]
+        delay: u64,
     },
     /// Join a hosted room via ticket
     Join {
@@ -50,6 +54,9 @@ enum Commands {
         /// Local port for MC client to connect
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_INLET_PORT)]
         port: u16,
+        /// Path status print interval in seconds (0 = only on change)
+        #[arg(short, long, default_value_t = 0)]
+        delay: u64,
     },
     /// Manage custom relay server configuration
     Relay {
@@ -79,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
             new_key,
             key_path,
             relay,
+            delay,
         } => {
             let path = key_path.unwrap_or_else(default_key_path);
             let secret_key = if new_key {
@@ -89,9 +97,12 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!(key_path = %path.display(), "using secret key");
 
             let relay_url = resolve_relay_url(relay.as_deref())?;
+            let config = TunnelConfig {
+                event_delay: Duration::from_secs(delay),
+            };
 
             let (tunnel, ticket, mut events) =
-                IrohTunnel::host(port, Some(secret_key), relay_url).await?;
+                IrohTunnel::host(port, Some(secret_key), relay_url, config).await?;
             let ticket_str = ticket.to_string();
             let quoted = format!("\"{ticket_str}\"");
             println!("Ticket: {quoted}");
@@ -117,14 +128,22 @@ async fn main() -> anyhow::Result<()> {
 
             tunnel.close().await;
         }
-        Commands::Join { ticket, port } => {
+        Commands::Join {
+            ticket,
+            port,
+            delay,
+        } => {
             let ticket: sculk_core::tunnel::Ticket =
                 ticket.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
             if let Some(ref url) = ticket.relay_url {
                 println!("Relay: {url}");
             }
 
-            let (tunnel, mut events) = IrohTunnel::join(&ticket, port).await?;
+            let config = TunnelConfig {
+                event_delay: Duration::from_secs(delay),
+            };
+
+            let (tunnel, mut events) = IrohTunnel::join(&ticket, port, config).await?;
             println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
             println!("Press Ctrl+C to stop.");
 

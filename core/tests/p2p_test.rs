@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use sculk_core::tunnel::TunnelEvent;
+use sculk_core::tunnel::{TunnelConfig, TunnelEvent};
 
 /// 启动一个简单的 TCP echo server，收到什么就回什么
 async fn echo_server(listener: TcpListener) {
@@ -36,7 +36,7 @@ async fn tunnel_echo_roundtrip() {
 
     // 2. Host: 创建隧道
     let (host_tunnel, ticket, mut host_events) =
-        sculk_core::tunnel::IrohTunnel::host(mc_port, None, None)
+        sculk_core::tunnel::IrohTunnel::host(mc_port, None, None, TunnelConfig::default())
             .await
             .unwrap();
 
@@ -45,9 +45,10 @@ async fn tunnel_echo_roundtrip() {
     let local_port = join_listener.local_addr().unwrap().port();
     drop(join_listener); // 释放端口给 IrohTunnel::join 使用
 
-    let (join_tunnel, mut join_events) = sculk_core::tunnel::IrohTunnel::join(&ticket, local_port)
-        .await
-        .unwrap();
+    let (join_tunnel, mut join_events) =
+        sculk_core::tunnel::IrohTunnel::join(&ticket, local_port, TunnelConfig::default())
+            .await
+            .unwrap();
 
     // 验证 join 端收到 Connected 事件
     let event = tokio::time::timeout(Duration::from_secs(5), join_events.recv())

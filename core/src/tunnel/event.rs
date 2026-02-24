@@ -1,4 +1,24 @@
-//! 隧道事件与连接快照类型
+//! 隧道事件、配置与连接快照类型
+
+use std::time::Duration;
+
+/// 隧道配置
+#[derive(Debug, Clone)]
+pub struct TunnelConfig {
+    /// PathChanged 事件策略。
+    ///
+    /// - `Duration::ZERO`（默认）：仅在状态实际变化时发送（去重模式）
+    /// - 其他值：按此间隔定期发送，relay ↔ direct 切换始终立即发送
+    pub event_delay: Duration,
+}
+
+impl Default for TunnelConfig {
+    fn default() -> Self {
+        Self {
+            event_delay: Duration::ZERO,
+        }
+    }
+}
 
 /// 隧道生命周期事件，通过 mpsc channel 推送给调用方
 #[derive(Debug, Clone)]

@@ -23,13 +23,14 @@
 //! - **Client**: 连接 Host，本地开放端口，MC 每次连入就开一条新的双向流转发
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use iroh::endpoint::{Connection, ConnectionInfo, PathInfoList, RecvStream, SendStream};
 use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
-use super::event::{ConnectionSnapshot, TunnelEvent};
+use super::event::{ConnectionSnapshot, TunnelConfig, TunnelEvent};
 use super::ticket::Ticket;
 
 /// sculk 隧道协议标识
@@ -55,6 +56,7 @@ impl IrohTunnel {
         mc_port: u16,
         secret_key: Option<SecretKey>,
         relay_url: Option<RelayUrl>,
+        config: TunnelConfig,
     ) -> anyhow::Result<(Self, Ticket, mpsc::Receiver<TunnelEvent>)> {
         let mut builder = build_endpoint(secret_key, relay_url.as_ref());
         builder = builder.alpns(vec![ALPN.to_vec()]);
@@ -69,8 +71,11 @@ impl IrohTunnel {
 
         let ep = endpoint.clone();
         let conns_clone = conns.clone();
+        let event_delay = config.event_delay;
         tokio::spawn(async move {
-            if let Err(e) = host_accept_loop(ep, mc_port, tx.clone(), conns_clone).await {
+            if let Err(e) =
+                host_accept_loop(ep, mc_port, tx.clone(), conns_clone, event_delay).await
+            {
                 let _ = tx
                     .send(TunnelEvent::Error {
                         message: format!("host loop ended: {e}"),
@@ -88,6 +93,7 @@ impl IrohTunnel {
     pub async fn join(
         ticket: &Ticket,
         local_port: u16,
+        config: TunnelConfig,
     ) -> anyhow::Result<(Self, mpsc::Receiver<TunnelEvent>)> {
         let endpoint = build_endpoint(None, ticket.relay_url.as_ref())
             .bind()
@@ -108,7 +114,12 @@ impl IrohTunnel {
 
         // 监控路径变化
         let remote_id = conn.remote_id().fmt_short().to_string();
-        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone());
+        spawn_path_monitor(
+            conn.clone(),
+            remote_id.clone(),
+            tx.clone(),
+            config.event_delay,
+        );
 
         // 监控断开
         let tx_dc = tx.clone();
@@ -192,6 +203,7 @@ async fn host_accept_loop(
     mc_port: u16,
     tx: mpsc::Sender<TunnelEvent>,
     conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    event_delay: Duration,
 ) -> anyhow::Result<()> {
     loop {
         let conn = endpoint
@@ -214,7 +226,7 @@ async fn host_accept_loop(
             .await;
 
         // 监控路径变化
-        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone());
+        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone(), event_delay);
 
         // 监控断开
         let tx_left = tx.clone();
@@ -283,33 +295,98 @@ async fn join_accept_loop(conn: Connection, listener: TcpListener) -> anyhow::Re
 }
 
 /// 监控连接路径变化，发送 PathChanged 事件
-fn spawn_path_monitor(conn: Connection, remote_id: String, tx: mpsc::Sender<TunnelEvent>) {
+///
+/// 两种模式：
+/// - `event_delay == ZERO`（去重模式）：仅在 (is_relay, rtt_ms) 实际变化时发送
+/// - `event_delay > 0`（定期模式）：按间隔定期发送，relay ↔ direct 切换立即发送
+///
+/// 首条事件始终立即发送。
+fn spawn_path_monitor(
+    conn: Connection,
+    remote_id: String,
+    tx: mpsc::Sender<TunnelEvent>,
+    event_delay: Duration,
+) {
     tokio::spawn(async move {
         let mut watcher = conn.paths();
+        let mut last_is_relay: Option<bool> = None;
+        let mut last_rtt_ms: Option<u64> = None;
 
-        // 发送初始路径状态
-        send_path_event(&watcher.get(), &remote_id, &tx).await;
+        // 始终立即发送初始路径状态
+        if let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) {
+            send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+            last_is_relay = Some(is_relay);
+            last_rtt_ms = Some(rtt_ms);
+        }
 
-        loop {
-            // 等待路径变化
-            if watcher.updated().await.is_err() {
-                break; // watcher disconnected（连接已关闭）
+        if event_delay.is_zero() {
+            // 去重模式：仅在状态实际变化时发送
+            loop {
+                if watcher.updated().await.is_err() {
+                    break;
+                }
+                let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) else {
+                    continue;
+                };
+                if last_is_relay != Some(is_relay) || last_rtt_ms != Some(rtt_ms) {
+                    send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+                    last_is_relay = Some(is_relay);
+                    last_rtt_ms = Some(rtt_ms);
+                }
             }
-            send_path_event(&watcher.get(), &remote_id, &tx).await;
+        } else {
+            // 定期模式：按间隔发送 + relay ↔ direct 立即发送
+            let mut timer = tokio::time::interval(event_delay);
+            timer.tick().await; // 跳过首次立即触发（初始状态已发送）
+
+            loop {
+                tokio::select! {
+                    result = watcher.updated() => {
+                        if result.is_err() { break; }
+                        let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) else {
+                            continue;
+                        };
+                        // relay ↔ direct 切换立即发送
+                        if last_is_relay != Some(is_relay) {
+                            send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+                            last_is_relay = Some(is_relay);
+                            timer.reset();
+                        }
+                    }
+                    _ = timer.tick() => {
+                        // 定期发送当前状态
+                        if let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) {
+                            send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+                            last_is_relay = Some(is_relay);
+                        }
+                    }
+                }
+            }
         }
     });
 }
 
-async fn send_path_event(paths: &PathInfoList, remote_id: &str, tx: &mpsc::Sender<TunnelEvent>) {
-    if let Some(selected) = paths.iter().find(|p| p.is_selected()) {
-        let _ = tx
-            .send(TunnelEvent::PathChanged {
-                remote_id: remote_id.to_string(),
-                is_relay: selected.is_relay(),
-                rtt_ms: selected.rtt().as_millis() as u64,
-            })
-            .await;
-    }
+/// 从路径列表中提取当前选中路径的 (is_relay, rtt_ms)
+fn extract_selected_path(paths: &PathInfoList) -> Option<(bool, u64)> {
+    paths
+        .iter()
+        .find(|p| p.is_selected())
+        .map(|p| (p.is_relay(), p.rtt().as_millis() as u64))
+}
+
+async fn send_path_event(
+    remote_id: &str,
+    is_relay: bool,
+    rtt_ms: u64,
+    tx: &mpsc::Sender<TunnelEvent>,
+) {
+    let _ = tx
+        .send(TunnelEvent::PathChanged {
+            remote_id: remote_id.to_string(),
+            is_relay,
+            rtt_ms,
+        })
+        .await;
 }
 
 /// 双向桥接：双向流 <-> TCP，任一方向断开则关闭
