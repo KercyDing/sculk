@@ -27,7 +27,7 @@ async fn echo_server(listener: TcpListener) {
 }
 
 #[tokio::test]
-#[ignore] // 需要真实网络（iroh relay），CI 中跳过
+#[cfg_attr(feature = "ci", ignore)] // CI 无真实网络，跳过
 async fn tunnel_echo_roundtrip() {
     // 1. 启动 echo server（模拟 MC 服务端）
     let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

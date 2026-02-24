@@ -3,6 +3,9 @@ name = "sculk-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+ci = []
+
 [dependencies]
 anyhow.workspace = true
 iroh.workspace = true
