@@ -2870,8 +2870,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "iroh",
+ "rand",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
