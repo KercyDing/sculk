@@ -40,6 +40,13 @@ sculk host -p 25565
 sculk join xxxxx -p 30000
 ```
 
+密钥默认持久化到系统数据目录，ticket 跨重启保持不变。如需更换：
+
+```sh
+sculk host --new-key            # 生成新密钥（ticket 会变）
+sculk host --key-path key.bin   # 自定义密钥文件路径
+```
+
 ## 开发
 
 需要安装 [just](https://github.com/casey/just) 命令运行器和 [nextest](https://nexte.st) 测试框架：
@@ -52,11 +59,11 @@ cargo install cargo-nextest --locked
 常用命令：
 
 ```sh
-just host              # 房主：创建房间（默认 25565）
-just join <ticket>     # 玩家：加入房间（默认 30000）
-just check             # fmt + check + clippy
-just test              # 运行测试
-just fmt               # 格式化代码
+just install             # 安装到 ~/.cargo/bin
+just uninstall           # 卸载
+just check               # fmt + check + clippy
+just test                # 运行测试
+just fmt                 # 格式化代码
 ```
 
 ## 卸载

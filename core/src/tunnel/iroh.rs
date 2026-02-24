@@ -25,7 +25,7 @@
 use std::sync::{Arc, Mutex};
 
 use iroh::endpoint::{Connection, ConnectionInfo, RecvStream, SendStream};
-use iroh::{Endpoint, EndpointId, Watcher};
+use iroh::{Endpoint, EndpointId, SecretKey, Watcher};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -48,11 +48,16 @@ impl IrohTunnel {
     /// 房主: 创建隧道，返回连接票据和事件接收端。
     ///
     /// 票据为 EndpointId 字符串，玩家可通过 n0 DNS 发现房主地址。
-    pub async fn host(mc_port: u16) -> anyhow::Result<(Self, String, mpsc::Receiver<TunnelEvent>)> {
-        let endpoint = Endpoint::builder()
-            .alpns(vec![ALPN.to_vec()])
-            .bind()
-            .await?;
+    /// 传入 `secret_key` 可使 ticket 跨重启保持稳定；传 `None` 则自动生成新密钥。
+    pub async fn host(
+        mc_port: u16,
+        secret_key: Option<SecretKey>,
+    ) -> anyhow::Result<(Self, String, mpsc::Receiver<TunnelEvent>)> {
+        let mut builder = Endpoint::builder().alpns(vec![ALPN.to_vec()]);
+        if let Some(key) = secret_key {
+            builder = builder.secret_key(key);
+        }
+        let endpoint = builder.bind().await?;
 
         // 等待连上 Relay，确保地址可被发现
         endpoint.online().await;

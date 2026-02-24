@@ -4,6 +4,10 @@
 //! - `sculk host` — 创建房间，获得票据
 //! - `sculk join <ticket>` — 用票据加入房间
 
+mod key;
+
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 use sculk_core::tunnel::{IrohTunnel, TunnelEvent};
 use tracing_subscriber::EnvFilter;
@@ -26,6 +30,12 @@ enum Commands {
         /// Local Minecraft server port
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_MC_PORT)]
         port: u16,
+        /// Generate a new secret key (changes ticket)
+        #[arg(long)]
+        new_key: bool,
+        /// Custom secret key file path
+        #[arg(long)]
+        key_path: Option<PathBuf>,
     },
     /// Join a hosted room via ticket
     Join {
@@ -46,8 +56,20 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Host { port } => {
-            let (tunnel, ticket, mut events) = IrohTunnel::host(port).await?;
+        Commands::Host {
+            port,
+            new_key,
+            key_path,
+        } => {
+            let path = key_path.unwrap_or_else(default_key_path);
+            let secret_key = if new_key {
+                key::generate_new_key(&path)?
+            } else {
+                key::load_or_generate_key(&path)?
+            };
+            tracing::info!(key_path = %path.display(), "using secret key");
+
+            let (tunnel, ticket, mut events) = IrohTunnel::host(port, Some(secret_key)).await?;
             println!("Ticket: {ticket}");
             println!("Share this ticket with players.");
             println!("Press Ctrl+C to stop.");
@@ -78,6 +100,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn default_key_path() -> PathBuf {
+    dirs::data_dir()
+        .expect("无法获取系统数据目录")
+        .join("sculk")
+        .join("secret.key")
 }
 
 fn print_event(event: &TunnelEvent) {

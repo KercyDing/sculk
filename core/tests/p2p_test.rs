@@ -36,7 +36,9 @@ async fn tunnel_echo_roundtrip() {
 
     // 2. Host: 创建隧道
     let (host_tunnel, ticket, mut host_events) =
-        sculk_core::tunnel::IrohTunnel::host(mc_port).await.unwrap();
+        sculk_core::tunnel::IrohTunnel::host(mc_port, None)
+            .await
+            .unwrap();
 
     // 3. Join: 用票据连接，监听随机端口
     let join_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
