@@ -103,13 +103,18 @@ async fn main() -> anyhow::Result<()> {
             println!("Share this ticket with players.");
             println!("Press Ctrl+C to stop.");
 
-            tokio::spawn(async move {
-                while let Some(event) = events.recv().await {
-                    print_event(&event);
+            let ctrl_c = tokio::signal::ctrl_c();
+            tokio::pin!(ctrl_c);
+            loop {
+                tokio::select! {
+                    _ = &mut ctrl_c => break,
+                    event = events.recv() => match event {
+                        Some(e) => print_event(&e),
+                        None => break,
+                    },
                 }
-            });
+            }
 
-            tokio::signal::ctrl_c().await?;
             tunnel.close().await;
         }
         Commands::Join { ticket, port } => {
@@ -123,13 +128,18 @@ async fn main() -> anyhow::Result<()> {
             println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
             println!("Press Ctrl+C to stop.");
 
-            tokio::spawn(async move {
-                while let Some(event) = events.recv().await {
-                    print_event(&event);
+            let ctrl_c = tokio::signal::ctrl_c();
+            tokio::pin!(ctrl_c);
+            loop {
+                tokio::select! {
+                    _ = &mut ctrl_c => break,
+                    event = events.recv() => match event {
+                        Some(e) => print_event(&e),
+                        None => break,
+                    },
                 }
-            });
+            }
 
-            tokio::signal::ctrl_c().await?;
             tunnel.close().await;
         }
         Commands::Relay { url, list, reset } => {
