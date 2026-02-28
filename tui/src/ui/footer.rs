@@ -5,28 +5,40 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::theme::{ACCENT, ERROR, PANEL};
-use crate::state::{AppState, FocusPane};
+use super::theme::{ACCENT, ERROR, INFO, PANEL};
+use crate::state::{AppState, InputMode};
 
 pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
-    let focus = match state.focus {
-        FocusPane::Profile => "概要",
-        FocusPane::Logs => "日志",
-    };
+    if state.input_mode == InputMode::Editing {
+        let footer = Paragraph::new(Line::from(vec![
+            Span::styled("编辑模式", Style::default().fg(INFO).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled("q", Style::default().fg(ACCENT)),
+            Span::raw(" 退出编辑  "),
+            Span::styled("Tab", Style::default().fg(ACCENT)),
+            Span::raw(" 下个字段  "),
+        ]))
+        .alignment(Alignment::Left)
+        .style(Style::default().bg(PANEL));
+        frame.render_widget(footer, area);
+        return;
+    }
+
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Enter", Style::default().fg(ACCENT)),
         Span::raw(" 执行  "),
+        Span::styled("e", Style::default().fg(ACCENT)),
+        Span::raw(" 编辑  "),
         Span::styled("←/→", Style::default().fg(ACCENT)),
-        Span::raw(" 切模式  "),
+        Span::raw(" 模式  "),
         Span::styled("Tab", Style::default().fg(ACCENT)),
         Span::raw(" 焦点  "),
         Span::styled("↑/↓", Style::default().fg(ACCENT)),
-        Span::raw(" 列表/日志  "),
+        Span::raw(" 字段  "),
         Span::styled("h", Style::default().fg(ACCENT)),
         Span::raw(" 帮助  "),
-        Span::styled("双击Esc", Style::default().fg(ERROR)),
-        Span::raw(" 退出  "),
-        Span::raw(format!("  [焦点: {focus}]")),
+        Span::styled("Esc", Style::default().fg(ERROR)),
+        Span::raw(" 退出"),
     ]))
     .alignment(Alignment::Left)
     .style(Style::default().bg(PANEL));

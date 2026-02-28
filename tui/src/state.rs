@@ -5,6 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::ListState;
 
+use crate::input::InputField;
 use crate::ui::theme::{ACCENT, INFO};
 
 pub const LOG_CAP: usize = 200;
@@ -24,9 +25,37 @@ pub enum FocusPane {
     Logs,
 }
 
+/// Normal 模式下快捷键生效；Editing 模式下字符送入输入字段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Normal,
+    Editing,
+}
+
 pub enum Step {
     Continue,
     Exit,
+}
+
+/// Host tab 的可编辑字段索引。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostField {
+    Port,
+    Password,
+}
+
+/// Join tab 的可编辑字段索引。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinField {
+    Ticket,
+    Port,
+    Password,
+}
+
+/// Relay tab 的可编辑字段索引。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayField {
+    Url,
 }
 
 pub struct AppState {
@@ -34,6 +63,7 @@ pub struct AppState {
     pub tick: u64,
     pub tab: ActiveTab,
     pub focus: FocusPane,
+    pub input_mode: InputMode,
     pub quit_pending: bool,
     pub logs: Vec<String>,
     pub log_state: ListState,
@@ -42,6 +72,21 @@ pub struct AppState {
     pub joined: bool,
     pub relay_idx: usize,
     pub route_idx: usize,
+
+    // Host tab 输入字段
+    pub host_port: InputField,
+    pub host_password: InputField,
+    pub host_field: HostField,
+
+    // Join tab 输入字段
+    pub join_ticket: InputField,
+    pub join_port: InputField,
+    pub join_password: InputField,
+    pub join_field: JoinField,
+
+    // Relay tab 输入字段
+    pub relay_url: InputField,
+    pub relay_field: RelayField,
 }
 
 impl Default for AppState {
@@ -51,6 +96,7 @@ impl Default for AppState {
             tick: 0,
             tab: ActiveTab::Host,
             focus: FocusPane::Profile,
+            input_mode: InputMode::Normal,
             quit_pending: false,
             logs: Vec::new(),
             log_state: ListState::default(),
@@ -59,28 +105,158 @@ impl Default for AppState {
             joined: false,
             relay_idx: 0,
             route_idx: 0,
+
+            host_port: InputField::with_value("端口", "25565"),
+            host_password: InputField::new("密码"),
+            host_field: HostField::Port,
+
+            join_ticket: InputField::new("票据"),
+            join_port: InputField::with_value("端口", "30000"),
+            join_password: InputField::new("密码"),
+            join_field: JoinField::Ticket,
+
+            relay_url: InputField::new("URL"),
+            relay_field: RelayField::Url,
         };
         state.relay_state.select(Some(0));
-        state.add_log("sculk-tui 已就绪，按 Enter 执行当前模式");
+        state.add_log("已就绪，按 Enter 执行当前模式");
         state
     }
 }
 
 impl AppState {
+    /// 获取当前活跃的输入字段。
+    pub fn active_input(&self) -> &InputField {
+        match self.tab {
+            ActiveTab::Host => match self.host_field {
+                HostField::Port => &self.host_port,
+                HostField::Password => &self.host_password,
+            },
+            ActiveTab::Join => match self.join_field {
+                JoinField::Ticket => &self.join_ticket,
+                JoinField::Port => &self.join_port,
+                JoinField::Password => &self.join_password,
+            },
+            ActiveTab::Relay => &self.relay_url,
+        }
+    }
+
+    fn active_input_mut(&mut self) -> &mut InputField {
+        match self.tab {
+            ActiveTab::Host => match self.host_field {
+                HostField::Port => &mut self.host_port,
+                HostField::Password => &mut self.host_password,
+            },
+            ActiveTab::Join => match self.join_field {
+                JoinField::Ticket => &mut self.join_ticket,
+                JoinField::Port => &mut self.join_port,
+                JoinField::Password => &mut self.join_password,
+            },
+            ActiveTab::Relay => &mut self.relay_url,
+        }
+    }
+
+    /// 切换到下一个输入字段。
+    fn next_field(&mut self) {
+        match self.tab {
+            ActiveTab::Host => {
+                self.host_field = match self.host_field {
+                    HostField::Port => HostField::Password,
+                    HostField::Password => HostField::Port,
+                };
+            }
+            ActiveTab::Join => {
+                self.join_field = match self.join_field {
+                    JoinField::Ticket => JoinField::Port,
+                    JoinField::Port => JoinField::Password,
+                    JoinField::Password => JoinField::Ticket,
+                };
+            }
+            ActiveTab::Relay => {}
+        }
+    }
+
+    /// 切换到上一个输入字段。
+    fn prev_field(&mut self) {
+        match self.tab {
+            ActiveTab::Host => {
+                self.host_field = match self.host_field {
+                    HostField::Port => HostField::Password,
+                    HostField::Password => HostField::Port,
+                };
+            }
+            ActiveTab::Join => {
+                self.join_field = match self.join_field {
+                    JoinField::Ticket => JoinField::Password,
+                    JoinField::Port => JoinField::Ticket,
+                    JoinField::Password => JoinField::Port,
+                };
+            }
+            ActiveTab::Relay => {}
+        }
+    }
+
     /// 处理单个键盘事件并返回循环控制信号。
     pub fn handle_key(&mut self, key: KeyEvent) -> Step {
-        if !matches!(key.code, KeyCode::Esc) {
+        // 编辑模式下 Esc 无效，只有 q 退出编辑
+        if self.input_mode == InputMode::Editing {
             self.quit_pending = false;
+            return self.handle_editing_key(key);
         }
-        match key.code {
-            KeyCode::Esc => {
-                if self.quit_pending {
-                    Step::Exit
-                } else {
-                    self.quit_pending = true;
-                    Step::Continue
-                }
+
+        // Normal 模式：Esc 双击退出
+        if key.code == KeyCode::Esc {
+            if self.quit_pending {
+                return Step::Exit;
+            } else {
+                self.quit_pending = true;
+                return Step::Continue;
             }
+        }
+        self.quit_pending = false;
+
+        self.handle_normal_key(key)
+    }
+
+    fn handle_editing_key(&mut self, key: KeyEvent) -> Step {
+        match key.code {
+            KeyCode::Char('q') => {
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Tab => {
+                self.next_field();
+            }
+            KeyCode::BackTab => {
+                self.prev_field();
+            }
+            KeyCode::Backspace => {
+                self.active_input_mut().backspace();
+            }
+            KeyCode::Delete => {
+                self.active_input_mut().delete();
+            }
+            KeyCode::Left => {
+                self.active_input_mut().move_left();
+            }
+            KeyCode::Right => {
+                self.active_input_mut().move_right();
+            }
+            KeyCode::Home => {
+                self.active_input_mut().move_home();
+            }
+            KeyCode::End => {
+                self.active_input_mut().move_end();
+            }
+            KeyCode::Char(c) => {
+                self.active_input_mut().insert(c);
+            }
+            _ => {}
+        }
+        Step::Continue
+    }
+
+    fn handle_normal_key(&mut self, key: KeyEvent) -> Step {
+        match key.code {
             KeyCode::Char('h') | KeyCode::Char('?') => {
                 self.show_help = !self.show_help;
                 Step::Continue
@@ -104,6 +280,8 @@ impl AppState {
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.tab == ActiveTab::Relay && self.focus == FocusPane::Profile {
                     self.prev_relay_selection();
+                } else if self.focus == FocusPane::Profile {
+                    self.prev_field();
                 } else {
                     self.prev_log();
                 }
@@ -112,13 +290,21 @@ impl AppState {
             KeyCode::Down | KeyCode::Char('j') => {
                 if self.tab == ActiveTab::Relay && self.focus == FocusPane::Profile {
                     self.next_relay_selection();
+                } else if self.focus == FocusPane::Profile {
+                    self.next_field();
                 } else {
                     self.next_log();
                 }
                 Step::Continue
             }
-            KeyCode::Enter | KeyCode::Char(' ') => {
+            KeyCode::Enter => {
                 self.primary_action();
+                Step::Continue
+            }
+            KeyCode::Char('e') => {
+                if self.focus == FocusPane::Profile {
+                    self.input_mode = InputMode::Editing;
+                }
                 Step::Continue
             }
             KeyCode::Char('r') => {
@@ -334,7 +520,7 @@ impl ActiveTab {
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::{ActiveTab, AppState, FocusPane, RELAYS, Step};
+    use super::{ActiveTab, AppState, FocusPane, InputMode, RELAYS, Step};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -347,19 +533,16 @@ mod tests {
 
     #[test]
     fn quit_keys_exit() {
+        // 双击 Esc 退出（全局）
         let mut state = AppState::default();
-        assert!(matches!(
-            state.handle_key(key(KeyCode::Esc)),
-            Step::Continue
-        ));
+        assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Continue));
         assert!(state.quit_pending);
         assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Exit));
+        // 编辑模式下双击 Esc 不退出
         let mut state = AppState::default();
-        assert!(matches!(
-            state.handle_key(key(KeyCode::Char('q'))),
-            Step::Continue
-        ));
-        assert!(!state.quit_pending);
+        state.input_mode = InputMode::Editing;
+        assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Continue));
+        assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Continue));
     }
 
     #[test]
@@ -449,5 +632,29 @@ mod tests {
 
         assert!(matches!(state.handle_key(key(KeyCode::Up)), Step::Continue));
         assert_eq!(state.relay_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn editing_mode_inserts_chars() {
+        let mut state = AppState::default();
+        state.input_mode = InputMode::Editing;
+        state.host_port.clear();
+        state.handle_key(key(KeyCode::Char('8')));
+        state.handle_key(key(KeyCode::Char('0')));
+        assert_eq!(state.host_port.value, "80");
+        state.handle_key(key(KeyCode::Char('q')));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn enter_editing_with_e_key() {
+        let mut state = AppState::default();
+        state.focus = FocusPane::Profile;
+        // Enter 执行操作，不进编辑
+        state.handle_key(key(KeyCode::Enter));
+        assert_eq!(state.input_mode, InputMode::Normal);
+        // e 进编辑
+        state.handle_key(key(KeyCode::Char('e')));
+        assert_eq!(state.input_mode, InputMode::Editing);
     }
 }
