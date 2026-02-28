@@ -2,6 +2,7 @@ mod app;
 mod state;
 mod ui;
 
-fn main() -> anyhow::Result<()> {
-    app::run_tui()
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    app::run_tui().await
 }
