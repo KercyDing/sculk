@@ -1,4 +1,4 @@
-//! Secret key file management: load, generate, and persist iroh SecretKey.
+//! 密钥文件管理：加载、生成并持久化 iroh `SecretKey`。
 
 use std::path::Path;
 
@@ -7,7 +7,7 @@ use sculk_core::tunnel::SecretKey;
 
 const KEY_LEN: usize = 32;
 
-/// Load key from file; generate and save a new one if file does not exist.
+/// 从文件加载密钥；若文件不存在则生成新密钥并保存。
 pub fn load_or_generate_key(path: &Path) -> anyhow::Result<SecretKey> {
     if path.exists() {
         load_key(path)
@@ -16,7 +16,7 @@ pub fn load_or_generate_key(path: &Path) -> anyhow::Result<SecretKey> {
     }
 }
 
-/// Force-generate a new key and save (overwrites existing file).
+/// 强制生成新密钥并保存（会覆盖已有文件）。
 pub fn generate_new_key(path: &Path) -> anyhow::Result<SecretKey> {
     let key = SecretKey::generate(&mut rand::rng());
     save_key(path, &key)?;
@@ -40,7 +40,30 @@ fn save_key(path: &Path, key: &SecretKey) -> anyhow::Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create key directory: {}", parent.display()))?;
     }
-    std::fs::write(path, key.to_bytes())
-        .with_context(|| format!("failed to write key file: {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        // Unix 下强制 0o600，避免私钥被其他用户读取。
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("failed to open key file: {}", path.display()))?;
+        file.write_all(&key.to_bytes())
+            .with_context(|| format!("failed to write key file: {}", path.display()))?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, key.to_bytes())
+            .with_context(|| format!("failed to write key file: {}", path.display()))?;
+    }
+
     Ok(())
 }

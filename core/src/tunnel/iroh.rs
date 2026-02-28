@@ -312,21 +312,13 @@ async fn host_accept_loop(
                 Ok(true) => {}
                 Ok(false) => {
                     tracing::info!(remote = %remote_id, "auth failed");
-                    let _ = tx
-                        .send(TunnelEvent::AuthFailed {
-                            id: remote_id,
-                        })
-                        .await;
+                    let _ = tx.send(TunnelEvent::AuthFailed { id: remote_id }).await;
                     conn.close(CLOSE_AUTH_FAILED, b"auth failed");
                     continue;
                 }
                 Err(e) => {
                     tracing::warn!(remote = %remote_id, "auth error: {e}");
-                    let _ = tx
-                        .send(TunnelEvent::AuthFailed {
-                            id: remote_id,
-                        })
-                        .await;
+                    let _ = tx.send(TunnelEvent::AuthFailed { id: remote_id }).await;
                     conn.close(CLOSE_AUTH_FAILED, b"auth failed");
                     continue;
                 }
@@ -446,9 +438,7 @@ async fn reconnect_supervisor(
             {
                 let _ = tx
                     .send(TunnelEvent::Error {
-                        message: format!(
-                            "max retries ({max}) exceeded, giving up"
-                        ),
+                        message: format!("max retries ({max}) exceeded, giving up"),
                     })
                     .await;
                 return;
@@ -462,9 +452,7 @@ async fn reconnect_supervisor(
                 config.max_backoff,
             );
 
-            let _ = tx
-                .send(TunnelEvent::Reconnecting { attempt })
-                .await;
+            let _ = tx.send(TunnelEvent::Reconnecting { attempt }).await;
 
             tracing::info!(attempt, ?backoff, "reconnecting...");
             tokio::time::sleep(backoff).await;

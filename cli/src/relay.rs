@@ -1,14 +1,14 @@
-//! Relay config file management: load, save, and remove custom relay URL.
+//! Relay 配置文件管理：加载、保存和删除自定义 relay 地址。
 //!
-//! Config is a plain text file containing a single URL string.
-//! Path: `{data_dir}/sculk/relay.conf`
+//! 配置文件是纯文本格式，仅包含一个 URL 字符串。
+//! 路径：`{data_dir}/sculk/relay.conf`
 
 use std::path::Path;
 
 use anyhow::Context;
 use sculk_core::tunnel::RelayUrl;
 
-/// Load relay URL from config file. Returns `None` if file does not exist.
+/// 从配置文件加载 relay 地址；文件不存在时返回 `None`。
 pub fn load_relay_url(path: &Path) -> anyhow::Result<Option<RelayUrl>> {
     if !path.exists() {
         return Ok(None);
@@ -22,7 +22,7 @@ pub fn load_relay_url(path: &Path) -> anyhow::Result<Option<RelayUrl>> {
     Ok(Some(url))
 }
 
-/// Save relay URL to config file.
+/// 保存 relay 地址到配置文件。
 pub fn save_relay_url(path: &Path, url: &str) -> anyhow::Result<()> {
     url.parse::<RelayUrl>()
         .with_context(|| format!("invalid relay URL: {url}"))?;
@@ -35,7 +35,7 @@ pub fn save_relay_url(path: &Path, url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Remove relay config file, restoring default n0 relay servers.
+/// 删除 relay 配置文件，恢复默认 n0 relay。
 pub fn remove_relay_config(path: &Path) -> anyhow::Result<()> {
     if path.exists() {
         std::fs::remove_file(path)

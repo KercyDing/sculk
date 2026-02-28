@@ -1,5 +1,6 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
+[private]
 default:
     @just --list
 
@@ -17,9 +18,16 @@ check:
     cargo check --workspace
     cargo clippy --workspace -- -D warnings
 
-# 测试
+# 测试（离线优先，和 CI 口径一致）
 test:
-    cargo nextest run --workspace --no-tests=pass
+    cargo nextest run --workspace --features sculk-core/ci --no-tests=pass
+
+# 网络集成测试（需要可用网络环境）
+test-e2e:
+    cargo nextest run -p sculk-core --test p2p_test --no-tests=pass
+
+# 全量测试（稳定测试 + 网络集成测试）
+test-all: test test-e2e
 
 # 格式化
 fmt:

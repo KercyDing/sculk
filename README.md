@@ -62,9 +62,17 @@ cargo install cargo-nextest --locked
 just install             # 安装到 ~/.cargo/bin
 just uninstall           # 卸载
 just check               # fmt + check + clippy
-just test                # 运行测试
+just test                # 稳定测试（离线优先，CI 同口径）
+just test-e2e            # P2P 网络集成测试（需可用网络）
+just test-all            # 稳定测试 + 网络集成测试
 just fmt                 # 格式化代码
+just doc                 # 生成 API 文档站（target/doc）
 ```
+
+`just doc` 生成后，可直接打开：
+- `target/doc/sculk_core/index.html`（核心库入口）
+- `target/doc/sculk_core/tunnel/index.html`（隧道模块）
+- `target/doc/sculk/index.html`（CLI crate）
 
 ## 卸载
 

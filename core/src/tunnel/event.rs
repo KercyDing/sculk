@@ -67,11 +67,17 @@ pub enum TunnelEvent {
 /// 连接信息快照，由 `IrohTunnel::connections()` 返回
 #[derive(Debug, Clone)]
 pub struct ConnectionSnapshot {
+    /// 对端节点短 ID（用于标识玩家或房主）
     pub remote_id: String,
+    /// 当前是否走 relay 中继路径（`false` 表示直连）
     pub is_relay: bool,
+    /// 当前路径 RTT（毫秒）
     pub rtt_ms: u64,
+    /// 已发送字节数（UDP 统计）
     pub tx_bytes: u64,
+    /// 已接收字节数（UDP 统计）
     pub rx_bytes: u64,
+    /// 连接当前是否存活
     pub alive: bool,
     /// 快照采集时间，供调用方计算流量速率
     pub timestamp: Instant,

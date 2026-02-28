@@ -1,9 +1,9 @@
-//! sculk CLI
+//! sculk 命令行工具（CLI）。
 //!
-//! Usage:
-//! - `sculk host` — create a room and get a ticket
-//! - `sculk join "<ticket>"` — join a room via ticket (quote the ticket!)
-//! - `sculk relay` — manage custom relay server
+//! 用法：
+//! - `sculk host`：创建房间并生成连接票据（ticket）
+//! - `sculk join "<ticket>"`：通过票据加入房间（注意给 ticket 加引号）
+//! - `sculk relay`：管理自定义 relay 配置
 
 mod key;
 mod relay;
@@ -29,56 +29,56 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start hosting and expose local MC server
+    /// 作为房主启动并暴露本地 MC 服务端
     Host {
-        /// Local Minecraft server port
+        /// 本地 Minecraft 服务端端口
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_MC_PORT)]
         port: u16,
-        /// Generate a new secret key (changes ticket)
+        /// 强制生成新密钥（会改变 ticket）
         #[arg(long)]
         new_key: bool,
-        /// Custom secret key file path
+        /// 自定义密钥文件路径
         #[arg(long)]
         key_path: Option<PathBuf>,
-        /// Override relay server URL (takes precedence over config)
+        /// 覆盖 relay 地址（优先级高于配置文件）
         #[arg(short, long)]
         relay: Option<String>,
-        /// Path status print interval in seconds (0 = only on change)
+        /// 路径状态打印间隔（秒，0 = 仅变化时输出）
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
-        /// Connection password
+        /// 连接密码
         #[arg(long)]
         password: Option<String>,
-        /// Max number of players
+        /// 最大玩家数
         #[arg(long)]
         max_players: Option<u32>,
     },
-    /// Join a hosted room via ticket
+    /// 通过票据加入房主房间
     Join {
-        /// Ticket from the host
+        /// 房主提供的 ticket
         ticket: String,
-        /// Local port for MC client to connect
+        /// 本地给 MC 客户端连接的端口
         #[arg(short, long, default_value_t = sculk_core::DEFAULT_INLET_PORT)]
         port: u16,
-        /// Path status print interval in seconds (0 = only on change)
+        /// 路径状态打印间隔（秒，0 = 仅变化时输出）
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
-        /// Connection password
+        /// 连接密码
         #[arg(long)]
         password: Option<String>,
-        /// Max reconnection attempts (omit for unlimited)
+        /// 最大重连次数（不传则无限重连）
         #[arg(long)]
         max_retries: Option<u32>,
     },
-    /// Manage custom relay server configuration
+    /// 管理自定义 relay 配置
     Relay {
-        /// Set custom relay server URL
+        /// 设置自定义 relay 地址
         #[arg(long)]
         url: Option<String>,
-        /// Show current relay configuration
+        /// 显示当前 relay 配置
         #[arg(long)]
         list: bool,
-        /// Reset to default n0 relay servers
+        /// 重置为默认 n0 relay
         #[arg(long)]
         reset: bool,
     },
@@ -223,7 +223,7 @@ fn default_relay_conf_path() -> PathBuf {
         .join("relay.conf")
 }
 
-/// Resolve relay URL: --relay flag > config file > None (default n0)
+/// 解析 relay 地址，优先级：命令行 `--relay` > 配置文件 > `None`（默认 n0）
 fn resolve_relay_url(flag: Option<&str>) -> anyhow::Result<Option<RelayUrl>> {
     if let Some(url_str) = flag {
         let url: RelayUrl = url_str
@@ -249,7 +249,9 @@ fn print_event(event: &TunnelEvent) {
             println!("[~] {remote_id} path: {mode}, RTT: {rtt_ms}ms");
         }
         TunnelEvent::Error { message } => eprintln!("[!] Error: {message}"),
-        TunnelEvent::Reconnecting { attempt } => println!("[~] Reconnecting (attempt {attempt})..."),
+        TunnelEvent::Reconnecting { attempt } => {
+            println!("[~] Reconnecting (attempt {attempt})...")
+        }
         TunnelEvent::Reconnected => println!("[*] Reconnected to host"),
         TunnelEvent::AuthFailed { id } => println!("[!] Auth failed: {id}"),
         TunnelEvent::PlayerRejected { id, reason } => {
