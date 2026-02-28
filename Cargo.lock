@@ -619,6 +619,7 @@ dependencies = [
  "crossterm_winapi",
  "derive_more",
  "document-features",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix",
@@ -3738,8 +3739,16 @@ name = "sculk-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "crossterm",
+ "dirs",
+ "futures",
+ "rand 0.10.0",
  "ratatui",
+ "sculk-core",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

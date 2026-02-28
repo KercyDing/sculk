@@ -1,4 +1,4 @@
-//! 异步事件循环：tokio::select! 同时监听键盘事件与 tick。
+//! 异步事件循环：tokio::select! 同时监听键盘事件、隧道事件与 tick。
 
 use std::io;
 use std::time::Duration;
@@ -11,6 +11,7 @@ use crossterm::terminal::{
 use futures::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use tokio::sync::mpsc;
 use tokio::time;
 
 use crate::state::{AppState, Step};
@@ -18,10 +19,12 @@ use crate::ui;
 
 const TICK: Duration = Duration::from_millis(200);
 
-/// 启动 TUI 异步事件循环，按 `Esc` 连按两次退出。
+/// 启动 TUI 异步事件循环。
 pub async fn run_tui() -> anyhow::Result<()> {
     let mut terminal = init_terminal()?;
-    let mut state = AppState::default();
+
+    let (app_tx, mut app_rx) = mpsc::unbounded_channel();
+    let mut state = AppState::new(app_tx);
 
     let run_result = async {
         let mut event_stream = EventStream::new();
@@ -36,6 +39,9 @@ pub async fn run_tui() -> anyhow::Result<()> {
                     let Event::Key(key) = event_result? else { continue };
                     if key.kind == KeyEventKind::Release { continue }
                     if matches!(state.handle_key(key), Step::Exit) { break }
+                }
+                Some(app_event) = app_rx.recv() => {
+                    state.handle_app_event(app_event);
                 }
                 _ = tick_interval.tick() => {
                     state.on_tick();

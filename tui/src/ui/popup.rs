@@ -30,16 +30,17 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
-        Line::raw("Enter / Space : 执行当前模式"),
+        Line::raw("Enter          : 执行当前模式（建房/加入/应用中继）"),
         Line::raw("Left / Right   : 切换 建房 / 加入 / 中继 模式"),
         Line::raw("Tab            : 在 概要 与 日志 间切换焦点"),
-        Line::raw("Up / Down      : 中继页选中列表（其他页浏览日志）"),
-        Line::raw("r              : 轮换模拟路由"),
+        Line::raw("Up / Down      : 切换字段 / 选择中继 / 浏览日志"),
+        Line::raw("e              : 进入编辑模式"),
+        Line::raw("q              : 退出编辑模式"),
         Line::raw("c              : 清空日志"),
         Line::raw("h / ?          : 显示或关闭帮助"),
-        Line::raw("Esc (连按两次) : 退出"),
+        Line::raw("Esc (连按两次) : 退出程序"),
         Line::raw(""),
-        Line::raw("该界面是高保真交互骨架，后续可直接接入真实 tunnel 事件流。"),
+        Line::raw("建房模式下 Enter 启动/停止隧道，票据自动复制到剪贴板。"),
     ]))
     .wrap(Wrap { trim: true });
     frame.render_widget(help, popup.inner(Margin::new(1, 1)));

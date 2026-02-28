@@ -260,10 +260,30 @@ fn render_field_line(
         cols[0],
     );
 
-    let display = if field.value.is_empty() && !editing {
-        "(空)".to_string()
+    let max_w = cols[1].width as usize;
+    let chars: Vec<char> = field.value.chars().collect();
+    let char_count = chars.len();
+
+    let (display, cursor_offset) = if field.value.is_empty() && !editing {
+        ("(空)".to_string(), 0)
+    } else if char_count <= max_w {
+        (field.value.clone(), field.value[..field.cursor].chars().count())
+    } else if editing {
+        // 编辑模式：保持光标可见的滑动窗口
+        let cursor_char = field.value[..field.cursor].chars().count();
+        let start = if cursor_char >= max_w {
+            cursor_char - max_w + 1
+        } else {
+            0
+        };
+        let end = (start + max_w).min(char_count);
+        let s: String = chars[start..end].iter().collect();
+        (s, cursor_char - start)
     } else {
-        field.value.clone()
+        // 普通模式：截断并显示省略号
+        let mut s: String = chars[..max_w.saturating_sub(1)].iter().collect();
+        s.push('…');
+        (s, 0)
     };
 
     let value_style = if editing {
@@ -281,7 +301,6 @@ fn render_field_line(
     );
 
     if editing {
-        let char_pos = field.value[..field.cursor].chars().count() as u16;
-        frame.set_cursor_position((cols[1].x + char_pos, cols[1].y));
+        frame.set_cursor_position((cols[1].x + cursor_offset as u16, cols[1].y));
     }
 }

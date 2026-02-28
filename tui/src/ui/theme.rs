@@ -10,6 +10,24 @@ pub const INFO: Color = Color::Rgb(59, 130, 246);
 pub const WARN: Color = Color::Rgb(245, 158, 11);
 pub const ERROR: Color = Color::Rgb(248, 113, 113);
 
+/// 状态栏颜色标识，由 AppState::status_label() 返回。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusColor {
+    Accent,
+    Info,
+    Warn,
+}
+
+impl StatusColor {
+    pub fn color(self) -> Color {
+        match self {
+            StatusColor::Accent => ACCENT,
+            StatusColor::Info => INFO,
+            StatusColor::Warn => WARN,
+        }
+    }
+}
+
 /// 根据焦点状态返回边框样式。
 pub fn border_style(active: bool) -> Style {
     if active {

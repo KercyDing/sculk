@@ -5,28 +5,20 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
-use super::theme::{ACCENT, INFO, PANEL, WARN};
+use super::theme::PANEL;
 use crate::state::AppState;
 
 pub fn render_header(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
-    let status = if state.hosting {
-        Span::styled(
-            "托管中",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        )
-    } else if state.joined {
-        Span::styled(
-            "已加入",
-            Style::default().fg(INFO).add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::styled(
-            "空闲",
-            Style::default().fg(WARN).add_modifier(Modifier::BOLD),
-        )
-    };
+    let (label, color) = state.status_label();
+    let status = Span::styled(
+        label,
+        Style::default()
+            .fg(color.color())
+            .add_modifier(Modifier::BOLD),
+    );
+
     let route = Span::styled(
-        format!("路由-{}", state.route_idx + 1),
+        state.route_info(),
         Style::default().fg(Color::Cyan),
     );
     let relay = Span::styled(
@@ -39,7 +31,7 @@ pub fn render_header(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
             "  SCULK 控制台  ",
             Style::default()
                 .bg(Color::Rgb(8, 42, 35))
-                .fg(ACCENT)
+                .fg(super::theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
