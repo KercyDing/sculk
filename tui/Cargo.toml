@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+crossterm = "0.29.0"
+ratatui = "0.30.0"
 
 [[bin]]
 name = "sculk-tui"
