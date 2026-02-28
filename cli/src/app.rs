@@ -15,12 +15,23 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{key, relay};
 
+const CLAP_STYLES: clap::builder::styling::Styles = clap::builder::styling::Styles::styled()
+    .header(clap::builder::styling::AnsiColor::Yellow.on_default())
+    .usage(clap::builder::styling::AnsiColor::Green.on_default())
+    .literal(clap::builder::styling::AnsiColor::Cyan.on_default())
+    .placeholder(clap::builder::styling::AnsiColor::Green.on_default())
+    .valid(clap::builder::styling::AnsiColor::Green.on_default())
+    .invalid(clap::builder::styling::AnsiColor::Red.on_default())
+    .error(clap::builder::styling::AnsiColor::Red.on_default().bold());
+
 #[derive(Parser)]
 #[command(
     name = "sculk",
     version,
     about = "Minecraft 多人联机 P2P 隧道",
-    arg_required_else_help = true
+    arg_required_else_help = true,
+    color = clap::ColorChoice::Always,
+    styles = CLAP_STYLES
 )]
 struct Cli {
     #[command(subcommand)]
@@ -94,6 +105,7 @@ where
     T: Into<OsString> + Clone,
 {
     let _ = tracing_subscriber::fmt()
+        .with_ansi(true)
         .with_env_filter(EnvFilter::from_default_env())
         .try_init();
 

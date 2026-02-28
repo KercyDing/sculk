@@ -79,7 +79,8 @@ mod tests {
     use super::*;
 
     fn test_endpoint_id() -> EndpointId {
-        SecretKey::generate(&mut rand::rng()).public().into()
+        let bytes: [u8; 32] = rand::random();
+        SecretKey::from_bytes(&bytes).public().into()
     }
 
     #[test]

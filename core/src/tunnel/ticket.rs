@@ -81,7 +81,8 @@ mod tests {
     use super::*;
 
     fn test_endpoint_id() -> EndpointId {
-        iroh::SecretKey::generate(&mut rand::rng()).public().into()
+        let bytes: [u8; 32] = rand::random();
+        iroh::SecretKey::from_bytes(&bytes).public().into()
     }
 
     #[test]

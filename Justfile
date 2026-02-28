@@ -17,7 +17,7 @@ install-all: install install-tui
 
 # 卸载
 uninstall:
-    cargo uninstall sculk
+    cargo uninstall sculk-cli
 
 # 卸载 sculk-tui
 uninstall-tui:

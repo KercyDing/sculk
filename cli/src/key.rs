@@ -18,7 +18,10 @@ pub fn load_or_generate_key(path: &Path) -> anyhow::Result<SecretKey> {
 
 /// 强制生成新密钥并保存（会覆盖已有文件）。
 pub fn generate_new_key(path: &Path) -> anyhow::Result<SecretKey> {
-    let key = SecretKey::generate(&mut rand::rng());
+    // `iroh::SecretKey::generate` currently expects rand_core 0.9 traits, while this crate uses
+    // rand 0.10 APIs. Generate secure random key bytes with rand 0.10 and construct the key.
+    let bytes: [u8; KEY_LEN] = rand::random();
+    let key = SecretKey::from_bytes(&bytes);
     save_key(path, &key)?;
     Ok(key)
 }
