@@ -22,6 +22,7 @@
 //! - **Host**: 启动 Endpoint 等待连接，每收到一条双向流就桥接到本地 MC 服务端
 //! - **Client**: 连接 Host，本地开放端口，MC 每次连入就开一条新的双向流转发
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,7 +30,7 @@ use iroh::endpoint::{
     ApplicationClose, Connection, ConnectionError, ConnectionInfo, PathInfoList, RecvStream,
     SendStream, VarInt,
 };
-use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher};
+use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -54,6 +55,81 @@ const AUTH_REJECTED: u8 = 0x01;
 const CLOSE_AUTH_FAILED: VarInt = VarInt::from_u32(1);
 /// QUIC close code: 人数已满
 const CLOSE_SERVER_FULL: VarInt = VarInt::from_u32(2);
+/// QUIC close code: 同一玩家连接被新连接替换
+const CLOSE_REPLACED_BY_RECONNECT: VarInt = VarInt::from_u32(3);
+/// 拒绝连接后等待驱动收敛的最大时长
+const REJECT_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
+/// 满员时的重连宽限窗口
+const FULL_RECHECK_DELAY: Duration = Duration::from_millis(1500);
+
+struct SessionEntry {
+    generation: u64,
+    conn: Option<Connection>,
+}
+
+#[derive(Default)]
+struct HostSessions {
+    by_id: HashMap<EndpointId, SessionEntry>,
+}
+
+impl HostSessions {
+    fn active_players(&self) -> usize {
+        self.by_id.len()
+    }
+
+    fn contains(&self, endpoint_id: &EndpointId) -> bool {
+        self.by_id.contains_key(endpoint_id)
+    }
+
+    fn upsert(
+        &mut self,
+        endpoint_id: EndpointId,
+        conn: Connection,
+    ) -> (u64, bool, Option<Connection>) {
+        match self.by_id.get_mut(&endpoint_id) {
+            Some(entry) => {
+                entry.generation = entry.generation.saturating_add(1);
+                let generation = entry.generation;
+                let old_conn = entry.conn.replace(conn);
+                (generation, true, old_conn)
+            }
+            None => {
+                self.by_id.insert(
+                    endpoint_id,
+                    SessionEntry {
+                        generation: 1,
+                        conn: Some(conn),
+                    },
+                );
+                (1, false, None)
+            }
+        }
+    }
+
+    fn remove_if_current(&mut self, endpoint_id: &EndpointId, generation: u64) -> bool {
+        let is_current = self
+            .by_id
+            .get(endpoint_id)
+            .is_some_and(|entry| entry.generation == generation);
+        if is_current {
+            self.by_id.remove(endpoint_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    fn insert_for_test(&mut self, endpoint_id: EndpointId, generation: u64) {
+        self.by_id.insert(
+            endpoint_id,
+            SessionEntry {
+                generation,
+                conn: None,
+            },
+        );
+    }
+}
 
 /// 基于 iroh 的 P2P 隧道
 pub struct IrohTunnel {
@@ -84,15 +160,18 @@ impl IrohTunnel {
         let ticket = Ticket::new(endpoint.id(), relay_url);
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
+        let sessions: Arc<Mutex<HostSessions>> = Arc::new(Mutex::new(HostSessions::default()));
 
         let ep = endpoint.clone();
         let conns_clone = conns.clone();
+        let sessions_clone = sessions.clone();
         tokio::spawn(async move {
             if let Err(e) = host_accept_loop(
                 ep,
                 mc_port,
                 tx.clone(),
                 conns_clone,
+                sessions_clone,
                 config.event_delay,
                 config.password,
                 config.max_players,
@@ -267,11 +346,13 @@ async fn auth_verify(conn: &Connection, expected: &str) -> anyhow::Result<bool> 
 // ── Host ───────────────────────────────────────────────────
 
 /// Host: 持续接受 QUIC 连接，发送事件并管理连接列表
+#[allow(clippy::too_many_arguments)]
 async fn host_accept_loop(
     endpoint: Endpoint,
     mc_port: u16,
     tx: mpsc::Sender<TunnelEvent>,
     conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    sessions: Arc<Mutex<HostSessions>>,
     event_delay: Duration,
     password: Option<String>,
     max_players: Option<u32>,
@@ -283,27 +364,21 @@ async fn host_accept_loop(
             .ok_or_else(|| anyhow::anyhow!("endpoint closed"))?
             .await?;
 
-        let remote_id = conn.remote_id().fmt_short().to_string();
+        let remote_endpoint_id = conn.remote_id();
+        let remote_id = remote_endpoint_id.fmt_short().to_string();
         tracing::info!(remote = %remote_id, "player connected");
 
-        // 检查人数上限（在 auth 之前，避免满员时浪费握手开销）
-        if let Some(max) = max_players {
-            let active = {
-                let mut g = conns.lock().unwrap();
-                g.retain(|c| c.is_alive());
-                g.len() as u32
-            };
-            if active >= max {
-                tracing::info!(remote = %remote_id, "server full, rejecting");
-                let _ = tx
-                    .send(TunnelEvent::PlayerRejected {
-                        id: remote_id,
-                        reason: "server full".into(),
-                    })
-                    .await;
-                conn.close(CLOSE_SERVER_FULL, b"server full");
-                continue;
-            }
+        // 检查人数上限（按唯一玩家计数；同一 EndpointId 视为重连并放行）
+        if !capacity_check_with_grace(sessions.clone(), remote_endpoint_id, max_players).await {
+            tracing::info!(remote = %remote_id, "server full, rejecting");
+            let _ = tx
+                .send(TunnelEvent::PlayerRejected {
+                    id: remote_id.clone(),
+                    reason: "server full".into(),
+                })
+                .await;
+            spawn_rejected_conn_cleanup(conn, CLOSE_SERVER_FULL, b"server full", remote_id);
+            continue;
         }
 
         // 密码验证
@@ -312,28 +387,49 @@ async fn host_accept_loop(
                 Ok(true) => {}
                 Ok(false) => {
                     tracing::info!(remote = %remote_id, "auth failed");
-                    let _ = tx.send(TunnelEvent::AuthFailed { id: remote_id }).await;
-                    conn.close(CLOSE_AUTH_FAILED, b"auth failed");
+                    let _ = tx
+                        .send(TunnelEvent::AuthFailed {
+                            id: remote_id.clone(),
+                        })
+                        .await;
+                    spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
                     continue;
                 }
                 Err(e) => {
                     tracing::warn!(remote = %remote_id, "auth error: {e}");
-                    let _ = tx.send(TunnelEvent::AuthFailed { id: remote_id }).await;
-                    conn.close(CLOSE_AUTH_FAILED, b"auth failed");
+                    let _ = tx
+                        .send(TunnelEvent::AuthFailed {
+                            id: remote_id.clone(),
+                        })
+                        .await;
+                    spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
                     continue;
                 }
             }
+        }
+
+        // 注册为当前活跃会话，若同一玩家已有旧连接则替换
+        let (generation, is_reconnect, old_conn) = {
+            let mut guard = sessions.lock().unwrap();
+            guard.upsert(remote_endpoint_id, conn.clone())
+        };
+        if let Some(old_conn) = old_conn {
+            old_conn.close(CLOSE_REPLACED_BY_RECONNECT, b"replaced by reconnect");
         }
 
         // 保存连接信息
         let conn_info = conn.to_info();
         conns.lock().unwrap().push(conn_info.clone());
 
-        let _ = tx
-            .send(TunnelEvent::PlayerJoined {
-                id: remote_id.clone(),
-            })
-            .await;
+        if is_reconnect {
+            tracing::info!(remote = %remote_id, "player reconnected");
+        } else {
+            let _ = tx
+                .send(TunnelEvent::PlayerJoined {
+                    id: remote_id.clone(),
+                })
+                .await;
+        }
 
         // 监控路径变化
         spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone(), event_delay);
@@ -341,14 +437,25 @@ async fn host_accept_loop(
         // 监控断开
         let tx_left = tx.clone();
         let left_id = remote_id.clone();
+        let sessions_on_close = sessions.clone();
         tokio::spawn(async move {
-            if let Some((err, _stats)) = conn_info.closed().await {
+            let reason = match conn_info.closed().await {
+                Some((err, _stats)) => err.to_string(),
+                None => "connection closed".to_string(),
+            };
+            let should_emit_left = {
+                let mut guard = sessions_on_close.lock().unwrap();
+                guard.remove_if_current(&remote_endpoint_id, generation)
+            };
+            if should_emit_left {
                 let _ = tx_left
                     .send(TunnelEvent::PlayerLeft {
                         id: left_id,
-                        reason: err.to_string(),
+                        reason,
                     })
                     .await;
+            } else {
+                tracing::debug!(remote = %left_id, "stale connection closed, ignored");
             }
         });
 
@@ -358,6 +465,57 @@ async fn host_accept_loop(
             }
         });
     }
+}
+
+/// 满员时进行一次短暂复核，降低同一玩家重连的误拒绝概率。
+async fn capacity_check_with_grace(
+    sessions: Arc<Mutex<HostSessions>>,
+    incoming_id: EndpointId,
+    max_players: Option<u32>,
+) -> bool {
+    capacity_check_with_grace_delay(sessions, incoming_id, max_players, FULL_RECHECK_DELAY).await
+}
+
+async fn capacity_check_with_grace_delay(
+    sessions: Arc<Mutex<HostSessions>>,
+    incoming_id: EndpointId,
+    max_players: Option<u32>,
+    recheck_delay: Duration,
+) -> bool {
+    let Some(max) = max_players else {
+        return true;
+    };
+
+    let has_capacity_or_reconnect = |guard: &HostSessions| {
+        guard.contains(&incoming_id) || (guard.active_players() as u32) < max
+    };
+
+    {
+        let guard = sessions.lock().unwrap();
+        if has_capacity_or_reconnect(&guard) {
+            return true;
+        }
+    }
+
+    tokio::time::sleep(recheck_delay).await;
+
+    let guard = sessions.lock().unwrap();
+    has_capacity_or_reconnect(&guard)
+}
+
+/// 拒绝连接后异步 close 并等待 closed() 收敛，避免连接对象被立刻 drop。
+fn spawn_rejected_conn_cleanup(
+    conn: Connection,
+    code: VarInt,
+    reason: &'static [u8],
+    remote_id: String,
+) {
+    tokio::spawn(async move {
+        let info = conn.to_info();
+        conn.close(code, reason);
+        let _ = tokio::time::timeout(REJECT_DRAIN_TIMEOUT, info.closed()).await;
+        tracing::debug!(remote = %remote_id, "rejected connection cleanup finished");
+    });
 }
 
 /// Host: 处理单个连接，每条双向流桥接到本地 MC
@@ -719,4 +877,49 @@ fn build_endpoint(
         builder = builder.relay_mode(RelayMode::Custom(relay_map));
     }
     builder
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_endpoint_id() -> EndpointId {
+        SecretKey::generate(&mut rand::rng()).public().into()
+    }
+
+    #[test]
+    fn session_generation_guards_player_left() {
+        let endpoint_id = test_endpoint_id();
+        let mut sessions = HostSessions::default();
+        sessions.insert_for_test(endpoint_id, 2);
+
+        assert!(!sessions.remove_if_current(&endpoint_id, 1));
+        assert_eq!(sessions.active_players(), 1);
+
+        assert!(sessions.remove_if_current(&endpoint_id, 2));
+        assert_eq!(sessions.active_players(), 0);
+    }
+
+    #[tokio::test]
+    async fn capacity_allows_reconnect_when_full() {
+        let endpoint_id = test_endpoint_id();
+        let sessions = Arc::new(Mutex::new(HostSessions::default()));
+        sessions.lock().unwrap().insert_for_test(endpoint_id, 1);
+
+        let allowed =
+            capacity_check_with_grace_delay(sessions, endpoint_id, Some(1), Duration::ZERO).await;
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn capacity_rejects_new_player_when_full() {
+        let existing = test_endpoint_id();
+        let incoming = test_endpoint_id();
+        let sessions = Arc::new(Mutex::new(HostSessions::default()));
+        sessions.lock().unwrap().insert_for_test(existing, 1);
+
+        let allowed =
+            capacity_check_with_grace_delay(sessions, incoming, Some(1), Duration::ZERO).await;
+        assert!(!allowed);
+    }
 }
