@@ -1,0 +1,9 @@
+# P2P 测试依赖 iroh DNS discovery
+# 单线程分组确保它们串行执行
+[test-groups]
+serial-p2p = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "binary(p2p_test)"
+test-group = "serial-p2p"
+retries = 1

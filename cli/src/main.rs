@@ -46,6 +46,12 @@ enum Commands {
         /// Path status print interval in seconds (0 = only on change)
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
+        /// Connection password
+        #[arg(long)]
+        password: Option<String>,
+        /// Max number of players
+        #[arg(long)]
+        max_players: Option<u32>,
     },
     /// Join a hosted room via ticket
     Join {
@@ -57,6 +63,12 @@ enum Commands {
         /// Path status print interval in seconds (0 = only on change)
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
+        /// Connection password
+        #[arg(long)]
+        password: Option<String>,
+        /// Max reconnection attempts (omit for unlimited)
+        #[arg(long)]
+        max_retries: Option<u32>,
     },
     /// Manage custom relay server configuration
     Relay {
@@ -87,6 +99,8 @@ async fn main() -> anyhow::Result<()> {
             key_path,
             relay,
             delay,
+            password,
+            max_players,
         } => {
             let path = key_path.unwrap_or_else(default_key_path);
             let secret_key = if new_key {
@@ -99,6 +113,9 @@ async fn main() -> anyhow::Result<()> {
             let relay_url = resolve_relay_url(relay.as_deref())?;
             let config = TunnelConfig {
                 event_delay: Duration::from_secs(delay),
+                password,
+                max_players,
+                ..Default::default()
             };
 
             let (tunnel, ticket, mut events) =
@@ -107,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
             let quoted = format!("\"{ticket_str}\"");
             println!("Ticket: {quoted}");
 
-            if let Ok(()) = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&quoted)) {
+            if clipboard_copy(&quoted) {
                 println!("(Copied to clipboard)");
             }
 
@@ -132,6 +149,8 @@ async fn main() -> anyhow::Result<()> {
             ticket,
             port,
             delay,
+            password,
+            max_retries,
         } => {
             let ticket: sculk_core::tunnel::Ticket =
                 ticket.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -141,6 +160,9 @@ async fn main() -> anyhow::Result<()> {
 
             let config = TunnelConfig {
                 event_delay: Duration::from_secs(delay),
+                password,
+                max_retries,
+                ..Default::default()
             };
 
             let (tunnel, mut events) = IrohTunnel::join(&ticket, port, config).await?;
@@ -227,5 +249,57 @@ fn print_event(event: &TunnelEvent) {
             println!("[~] {remote_id} path: {mode}, RTT: {rtt_ms}ms");
         }
         TunnelEvent::Error { message } => eprintln!("[!] Error: {message}"),
+        TunnelEvent::Reconnecting { attempt } => println!("[~] Reconnecting (attempt {attempt})..."),
+        TunnelEvent::Reconnected => println!("[*] Reconnected to host"),
+        TunnelEvent::AuthFailed { id } => println!("[!] Auth failed: {id}"),
+        TunnelEvent::PlayerRejected { id, reason } => {
+            println!("[-] Player rejected: {id} ({reason})")
+        }
     }
+}
+
+/// 复制文本到系统剪贴板。
+///
+/// Linux Wayland 下优先使用 `wl-copy`（fork 后台进程持有内容），
+/// 其他平台回退到 arboard。
+fn clipboard_copy(text: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        // Wayland: wl-copy fork 后台进程，内容不随主进程退出丢失
+        if std::env::var_os("WAYLAND_DISPLAY").is_some()
+            && let Ok(mut child) = Command::new("wl-copy")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            return child.wait().is_ok_and(|s| s.success());
+        }
+
+        // X11: xclip
+        if std::env::var_os("DISPLAY").is_some()
+            && let Ok(mut child) = Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            return child.wait().is_ok_and(|s| s.success());
+        }
+    }
+
+    // macOS / Windows / fallback
+    arboard::Clipboard::new()
+        .and_then(|mut cb| cb.set_text(text))
+        .is_ok()
 }
