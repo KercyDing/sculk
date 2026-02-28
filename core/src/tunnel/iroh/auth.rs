@@ -1,0 +1,59 @@
+use super::*;
+
+const AUTH_VERSION: u8 = 0x01;
+const AUTH_OK: u8 = 0x00;
+const AUTH_REJECTED: u8 = 0x01;
+
+/// Join 侧发送密码并等待验证结果。
+pub(super) async fn auth_send(conn: &Connection, password: &str) -> anyhow::Result<()> {
+    let (mut send, mut recv) = conn.open_bi().await?;
+
+    let mut buf = Vec::with_capacity(1 + password.len());
+    buf.push(AUTH_VERSION);
+    buf.extend_from_slice(password.as_bytes());
+    send.write_all(&buf).await?;
+    send.finish()?;
+
+    let result = recv
+        .read_to_end(1)
+        .await
+        .map_err(|e| anyhow::anyhow!("auth read failed: {e}"))?;
+
+    if result.first() == Some(&AUTH_OK) {
+        Ok(())
+    } else {
+        anyhow::bail!("auth rejected by host")
+    }
+}
+
+/// Host 侧验证密码并回写结果。
+pub(super) async fn auth_verify(conn: &Connection, expected: &str) -> anyhow::Result<bool> {
+    let (mut send, mut recv) = conn.accept_bi().await?;
+
+    let data = recv
+        .read_to_end(1 + expected.len() + 256)
+        .await
+        .map_err(|e| anyhow::anyhow!("auth read failed: {e}"))?;
+
+    if data.is_empty() {
+        send.write_all(&[AUTH_REJECTED]).await?;
+        send.finish()?;
+        return Ok(false);
+    }
+
+    let version = data[0];
+    if version != AUTH_VERSION {
+        send.write_all(&[AUTH_REJECTED]).await?;
+        send.finish()?;
+        return Ok(false);
+    }
+
+    let password = &data[1..];
+    let ok = password == expected.as_bytes();
+
+    send.write_all(&[if ok { AUTH_OK } else { AUTH_REJECTED }])
+        .await?;
+    send.finish()?;
+
+    Ok(ok)
+}

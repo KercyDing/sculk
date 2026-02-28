@@ -1,0 +1,196 @@
+use super::*;
+
+use super::auth::auth_send;
+use super::monitor::spawn_path_monitor;
+use super::transport::bridge;
+
+const DEFAULT_INITIAL_RETRIES: u32 = 3;
+
+/// Join 侧重连 supervisor。
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn reconnect_supervisor(
+    endpoint: Endpoint,
+    endpoint_id: iroh::EndpointId,
+    mut conn: Connection,
+    mut conn_info: ConnectionInfo,
+    listener: Arc<TcpListener>,
+    tx: mpsc::Sender<TunnelEvent>,
+    conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    config: TunnelConfig,
+) {
+    loop {
+        let remote_id = conn.remote_id().fmt_short().to_string();
+        spawn_path_monitor(conn.clone(), remote_id, tx.clone(), config.event_delay);
+        let accept_handle = spawn_join_accept_loop(conn.clone(), listener.clone(), tx.clone());
+
+        let permanent_reject = if let Some((err, _stats)) = conn_info.closed().await {
+            let rejected = is_permanent_rejection(&err);
+            let _ = tx
+                .send(TunnelEvent::Disconnected {
+                    reason: err.to_string(),
+                })
+                .await;
+            rejected
+        } else {
+            false
+        };
+
+        accept_handle.abort();
+
+        if permanent_reject {
+            return;
+        }
+
+        if config.max_retries == Some(0) {
+            return;
+        }
+
+        let mut attempt: u32 = 0;
+        let reconnected = loop {
+            attempt += 1;
+
+            if let Some(max) = config.max_retries
+                && attempt > max
+            {
+                let _ = tx
+                    .send(TunnelEvent::Error {
+                        message: format!("max retries ({max}) exceeded, giving up"),
+                    })
+                    .await;
+                return;
+            }
+
+            let backoff = std::cmp::min(
+                config
+                    .base_backoff
+                    .saturating_mul(2u32.saturating_pow(attempt - 1)),
+                config.max_backoff,
+            );
+
+            let _ = tx.send(TunnelEvent::Reconnecting { attempt }).await;
+
+            tracing::info!(attempt, ?backoff, "reconnecting...");
+            tokio::time::sleep(backoff).await;
+
+            match endpoint.connect(endpoint_id, ALPN).await {
+                Ok(new_conn) => {
+                    if let Some(ref password) = config.password
+                        && let Err(e) = auth_send(&new_conn, password).await
+                    {
+                        tracing::warn!(attempt, "reconnect auth failed: {e}");
+                        continue;
+                    }
+                    break new_conn;
+                }
+                Err(e) => {
+                    tracing::warn!(attempt, "reconnect failed: {e}");
+                    continue;
+                }
+            }
+        };
+
+        conn = reconnected;
+        conn_info = conn.to_info();
+
+        {
+            let mut g = conns.lock().unwrap();
+            g.retain(|c| c.is_alive());
+            g.push(conn_info.clone());
+        }
+
+        let _ = tx.send(TunnelEvent::Reconnected).await;
+        tracing::info!("reconnected successfully");
+    }
+}
+
+/// 启动 join accept loop。
+fn spawn_join_accept_loop(
+    conn: Connection,
+    listener: Arc<TcpListener>,
+    tx: mpsc::Sender<TunnelEvent>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        if let Err(e) = join_accept_loop(conn, listener).await {
+            let _ = tx
+                .send(TunnelEvent::Error {
+                    message: format!("join loop ended: {e}"),
+                })
+                .await;
+        }
+    })
+}
+
+/// 判断是否为不应重连的拒绝类型。
+fn is_permanent_rejection(err: &ConnectionError) -> bool {
+    if let ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }) = err {
+        *error_code == CLOSE_AUTH_FAILED || *error_code == CLOSE_SERVER_FULL
+    } else {
+        false
+    }
+}
+
+/// 带重试的连接流程（含 auth）。
+pub(super) async fn connect_with_retry(
+    endpoint: &Endpoint,
+    endpoint_id: iroh::EndpointId,
+    config: &TunnelConfig,
+    tx: &mpsc::Sender<TunnelEvent>,
+) -> anyhow::Result<Connection> {
+    let max = DEFAULT_INITIAL_RETRIES;
+    let mut last_err = None;
+
+    for attempt in 0..=max {
+        if attempt > 0 {
+            let backoff = std::cmp::min(
+                config
+                    .base_backoff
+                    .saturating_mul(2u32.saturating_pow(attempt - 1)),
+                config.max_backoff,
+            );
+            tracing::info!(attempt, ?backoff, "retrying initial connection...");
+            let _ = tx.send(TunnelEvent::Reconnecting { attempt }).await;
+            tokio::time::sleep(backoff).await;
+        } else {
+            tracing::info!("connecting to host...");
+        }
+
+        match endpoint.connect(endpoint_id, ALPN).await {
+            Ok(conn) => {
+                if let Some(ref password) = config.password {
+                    auth_send(&conn, password).await?;
+                }
+                tracing::info!("connected to host");
+                return Ok(conn);
+            }
+            Err(e) => {
+                tracing::warn!(attempt, "connection failed: {e}");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(last_err.unwrap().into())
+}
+
+/// Join 侧本地监听并转发到 QUIC 双向流。
+async fn join_accept_loop(conn: Connection, listener: Arc<TcpListener>) -> anyhow::Result<()> {
+    loop {
+        let (tcp, peer) = listener.accept().await?;
+        tracing::info!(%peer, "MC client connected");
+
+        let conn = conn.clone();
+        tokio::spawn(async move {
+            let (send, recv) = match conn.open_bi().await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::error!("failed to open QUIC stream: {e}");
+                    return;
+                }
+            };
+
+            if let Err(e) = bridge(send, recv, tcp).await {
+                tracing::debug!(%peer, "stream closed: {e}");
+            }
+        });
+    }
+}

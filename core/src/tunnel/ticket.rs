@@ -1,20 +1,17 @@
 //! `sculk://` 票据格式的编解码。
 //!
-//! 票据格式:
+//! 票据格式：
 //! - `"sculk://<EndpointId>?relay=<RelayUrl>"` — 自定义 relay
 //! - `"sculk://<EndpointId>"` — 默认 n0 relay
-//!
-//! 注意: shell 中使用时需要用引号包裹，因为 `?` 会被 zsh 等 shell 解释为通配符。
 
 use std::fmt;
 use std::str::FromStr;
 
 use iroh::{EndpointId, RelayUrl};
 
-/// 票据 URL 协议前缀
 const SCHEME: &str = "sculk";
 
-/// 连接票据，编码了目标节点和可选的 relay 服务器地址。
+/// 连接票据，包含目标节点与可选 relay 地址。
 #[derive(Debug)]
 pub struct Ticket {
     pub endpoint_id: EndpointId,
@@ -22,7 +19,7 @@ pub struct Ticket {
 }
 
 impl Ticket {
-    /// 创建新的票据。
+    /// 创建票据。
     pub fn new(endpoint_id: EndpointId, relay_url: Option<RelayUrl>) -> Self {
         Self {
             endpoint_id,
@@ -83,7 +80,6 @@ impl FromStr for Ticket {
 mod tests {
     use super::*;
 
-    /// 生成测试用的 EndpointId
     fn test_endpoint_id() -> EndpointId {
         iroh::SecretKey::generate(&mut rand::rng()).public().into()
     }
@@ -102,7 +98,6 @@ mod tests {
         assert_eq!(parsed.endpoint_id, id);
         assert_eq!(parsed.relay_url.as_ref(), Some(&relay));
 
-        // 二次序列化/反序列化保持一致
         let s2 = parsed.to_string();
         let reparsed: Ticket = s2.parse().unwrap();
         assert_eq!(reparsed.endpoint_id, id);
