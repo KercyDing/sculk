@@ -8,9 +8,23 @@ default:
 install:
     cargo install --path cli
 
+# 安装 sculk-tui 到 ~/.cargo/bin
+install-tui:
+    cargo install --path tui
+
+# 安装全部客户端
+install-all: install install-tui
+
 # 卸载
 uninstall:
     cargo uninstall sculk
+
+# 卸载 sculk-tui
+uninstall-tui:
+    cargo uninstall sculk-tui
+
+# 卸载全部客户端
+uninstall-all: uninstall uninstall-tui
 
 # 检查
 check:

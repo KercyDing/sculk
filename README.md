@@ -40,6 +40,13 @@ sculk host -p 25565
 sculk join xxxxx -p 30000
 ```
 
+`sculk` 保持纯 CLI。另提供 `sculk-tui`：
+
+```sh
+# 默认进入 TUI
+sculk-tui
+```
+
 密钥默认持久化到系统数据目录，ticket 跨重启保持不变。如需更换：
 
 ```sh
@@ -60,7 +67,11 @@ cargo install cargo-nextest --locked
 
 ```sh
 just install             # 安装到 ~/.cargo/bin
+just install-tui         # 安装 sculk-tui
+just install-all         # 安装 sculk + sculk-tui
 just uninstall           # 卸载
+just uninstall-tui       # 卸载 sculk-tui
+just uninstall-all       # 卸载 sculk + sculk-tui
 just check               # fmt + check + clippy
 just test                # 稳定测试（离线优先，CI 同口径）
 just test-e2e            # P2P 网络集成测试（需可用网络）
@@ -73,6 +84,7 @@ just doc                 # 生成 API 文档站（target/doc）
 - `target/doc/sculk_core/index.html`（核心库入口）
 - `target/doc/sculk_core/tunnel/index.html`（隧道模块）
 - `target/doc/sculk/index.html`（CLI crate）
+- `target/doc/sculk_tui/index.html`（TUI crate）
 
 ## 卸载
 
