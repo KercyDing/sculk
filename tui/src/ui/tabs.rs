@@ -7,9 +7,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Tabs};
 
 use super::theme::{ACCENT, INFO, LEFT_PANEL_BG, WARN, border_style};
 use crate::input::InputField;
-use crate::state::{
-    ActiveTab, AppState, FocusPane, HostField, InputMode, JoinField, RELAYS, TAB_TITLES,
-};
+use crate::state::{ActiveTab, AppState, FocusPane, HostField, JoinField, RELAYS, TAB_TITLES};
 
 pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
     // 先铺整块左侧背景，保证空白区域也保持深色。
@@ -97,31 +95,23 @@ fn render_host_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
         rows[0],
     );
 
-    let editing = state.input_mode == InputMode::Editing;
     let focused = state.focus == FocusPane::Profile;
     render_field_line(
         frame,
         rows[2],
         &state.host_port,
         focused && state.host_field == HostField::Port,
-        editing && state.host_field == HostField::Port,
     );
     render_field_line(
         frame,
         rows[3],
         &state.host_password,
         focused && state.host_field == HostField::Password,
-        editing && state.host_field == HostField::Password,
     );
 
-    let hint = if editing {
-        "Esc 退出编辑 | Tab 切换字段"
-    } else {
-        "i 编辑 | ↑/↓ 切换字段"
-    };
     frame.render_widget(
         Paragraph::new(Span::styled(
-            hint,
+            "i 编辑 | ↑/↓ 切换字段",
             Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
         )),
         rows[5],
@@ -158,38 +148,29 @@ fn render_join_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
         rows[0],
     );
 
-    let editing = state.input_mode == InputMode::Editing;
     let focused = state.focus == FocusPane::Profile;
     render_field_line(
         frame,
         rows[2],
         &state.join_ticket,
         focused && state.join_field == JoinField::Ticket,
-        editing && state.join_field == JoinField::Ticket,
     );
     render_field_line(
         frame,
         rows[3],
         &state.join_port,
         focused && state.join_field == JoinField::Port,
-        editing && state.join_field == JoinField::Port,
     );
     render_field_line(
         frame,
         rows[4],
         &state.join_password,
         focused && state.join_field == JoinField::Password,
-        editing && state.join_field == JoinField::Password,
     );
 
-    let hint = if editing {
-        "Esc 退出编辑 | Tab 切换字段"
-    } else {
-        "i 编辑 | ↑/↓ 切换字段"
-    };
     frame.render_widget(
         Paragraph::new(Span::styled(
-            hint,
+            "i 编辑 | ↑/↓ 切换字段",
             Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
         )),
         rows[6],
@@ -202,7 +183,7 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
         Constraint::Length(1), // 空行
         Constraint::Length(1), // 中继项 0
         Constraint::Length(1), // 中继项 1
-        Constraint::Length(1), // URL 输入框
+        Constraint::Length(1), // 预留行
         Constraint::Length(1), // 空行
         Constraint::Length(1), // 提示
         Constraint::Min(0),
@@ -250,16 +231,15 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
         );
     }
 
-    // 选中"自建中继"时显示 URL 输入框
+    // 悬停在"自建中继"时显示 URL 预览和编辑提示
     if selected_idx == 1 {
-        let editing = state.input_mode == InputMode::Editing;
-        render_field_line(frame, rows[4], &state.relay_url, focused, editing);
+        render_field_line(frame, rows[4], &state.relay_url, false);
     }
 
-    let hint = if state.input_mode == InputMode::Editing && selected_idx == 1 {
-        "Esc 退出并应用"
-    } else {
+    let hint = if selected_idx == 1 {
         "Enter 应用 | ↑/↓ 选择 | i 编辑URL"
+    } else {
+        "Enter 应用 | ↑/↓ 选择"
     };
     frame.render_widget(
         Paragraph::new(Span::styled(
@@ -270,32 +250,25 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
     );
 }
 
-/// 渲染单行输入字段：`label: [value]`。
-/// `selected`: Normal 模式下当前字段高亮标签。
-/// `editing`: Editing 模式下显示光标。
+/// 渲染单行输入字段预览：`label: [value]`。
+/// `selected`: Normal 模式下当前字段高亮。长值截断并加省略号。
 fn render_field_line(
     frame: &mut ratatui::Frame<'_>,
     area: Rect,
     field: &InputField,
     selected: bool,
-    editing: bool,
 ) {
     let label_width = 8u16;
     let cols =
         Layout::horizontal([Constraint::Length(label_width), Constraint::Min(4)]).split(area);
 
-    let label_style = if editing {
-        Style::default()
-            .fg(ACCENT)
-            .bg(LEFT_PANEL_BG)
-            .add_modifier(Modifier::BOLD)
-    } else if selected {
+    let label_style = if selected {
         Style::default().fg(ACCENT).bg(LEFT_PANEL_BG)
     } else {
         Style::default().fg(WARN).bg(LEFT_PANEL_BG)
     };
 
-    let marker = if selected || editing { "▶ " } else { "  " };
+    let marker = if selected { "▶ " } else { "  " };
     frame.render_widget(
         Paragraph::new(Span::styled(
             format!("{}{}: ", marker, field.label),
@@ -308,44 +281,20 @@ fn render_field_line(
     let chars: Vec<char> = field.value.chars().collect();
     let char_count = chars.len();
 
-    let (display, cursor_offset) = if field.value.is_empty() && !editing {
-        ("(空)".to_string(), 0)
+    let display = if field.value.is_empty() {
+        "(空)".to_string()
     } else if char_count <= max_w {
-        (
-            field.value.clone(),
-            field.value[..field.cursor].chars().count(),
-        )
-    } else if editing {
-        // 编辑模式：保持光标可见的滑动窗口
-        let cursor_char = field.value[..field.cursor].chars().count();
-        let start = if cursor_char >= max_w {
-            cursor_char - max_w + 1
-        } else {
-            0
-        };
-        let end = (start + max_w).min(char_count);
-        let s: String = chars[start..end].iter().collect();
-        (s, cursor_char - start)
+        field.value.clone()
     } else {
-        // 普通模式：截断并显示省略号
         let mut s: String = chars[..max_w.saturating_sub(1)].iter().collect();
         s.push('…');
-        (s, 0)
+        s
     };
 
-    let value_style = if editing {
-        Style::default()
-            .fg(Color::White)
-            .bg(LEFT_PANEL_BG)
-            .add_modifier(Modifier::UNDERLINED)
-    } else if selected {
+    let value_style = if selected {
         Style::default().fg(Color::White).bg(LEFT_PANEL_BG)
     } else {
         Style::default().fg(Color::Gray).bg(LEFT_PANEL_BG)
     };
     frame.render_widget(Paragraph::new(Span::styled(display, value_style)), cols[1]);
-
-    if editing {
-        frame.set_cursor_position((cols[1].x + cursor_offset as u16, cols[1].y));
-    }
 }

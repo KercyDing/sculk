@@ -31,6 +31,7 @@ pub fn render(frame: &mut ratatui::Frame<'_>, state: &mut AppState) {
     render_main(frame, layout[1], state);
     footer::render_footer(frame, layout[2], state);
     popup::render_help_popup(frame, area, state);
+    popup::render_edit_popup(frame, area, state);
 }
 
 fn render_main(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, state: &mut AppState) {

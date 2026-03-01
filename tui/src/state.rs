@@ -180,16 +180,16 @@ impl AppState {
         match key.code {
             KeyCode::Esc => {
                 self.input_mode = InputMode::Normal;
-                // 中继 tab 退出编辑时自动保存
+                // 中继弹窗关闭时仅持久化 URL 文本，不切换中继（Enter 才应用）
                 if self.tab == ActiveTab::Relay {
-                    self.apply_relay();
+                    self.persist_relay_url();
                 }
             }
-            KeyCode::Tab => {
-                self.next_field();
+            KeyCode::Up => {
+                self.prev_field_clamped();
             }
-            KeyCode::BackTab => {
-                self.prev_field();
+            KeyCode::Down => {
+                self.next_field_clamped();
             }
             KeyCode::Backspace => {
                 self.active_input_mut().backspace();
@@ -264,7 +264,11 @@ impl AppState {
                 Step::Continue
             }
             KeyCode::Char('i') => {
-                if self.focus == FocusPane::Profile {
+                let can_edit = match self.tab {
+                    ActiveTab::Relay => self.relay_state.selected() == Some(1),
+                    _ => true,
+                };
+                if can_edit {
                     self.input_mode = InputMode::Editing;
                 }
                 Step::Continue
@@ -604,14 +608,14 @@ impl AppState {
             ActiveTab::Host => {
                 self.host_field = match self.host_field {
                     HostField::Port => HostField::Password,
-                    HostField::Password => HostField::Port,
+                    HostField::Password => HostField::Password,
                 };
             }
             ActiveTab::Join => {
                 self.join_field = match self.join_field {
                     JoinField::Ticket => JoinField::Port,
                     JoinField::Port => JoinField::Password,
-                    JoinField::Password => JoinField::Ticket,
+                    JoinField::Password => JoinField::Password,
                 };
             }
             ActiveTab::Relay => {}
@@ -622,18 +626,71 @@ impl AppState {
         match self.tab {
             ActiveTab::Host => {
                 self.host_field = match self.host_field {
-                    HostField::Port => HostField::Password,
+                    HostField::Port => HostField::Port,
                     HostField::Password => HostField::Port,
                 };
             }
             ActiveTab::Join => {
                 self.join_field = match self.join_field {
-                    JoinField::Ticket => JoinField::Password,
+                    JoinField::Ticket => JoinField::Ticket,
                     JoinField::Port => JoinField::Ticket,
                     JoinField::Password => JoinField::Port,
                 };
             }
             ActiveTab::Relay => {}
+        }
+    }
+
+    /// 编辑模式下向后切换字段，到末尾停止。
+    fn next_field_clamped(&mut self) {
+        match self.tab {
+            ActiveTab::Host => {
+                self.host_field = match self.host_field {
+                    HostField::Port => HostField::Password,
+                    HostField::Password => HostField::Password,
+                };
+            }
+            ActiveTab::Join => {
+                self.join_field = match self.join_field {
+                    JoinField::Ticket => JoinField::Port,
+                    JoinField::Port => JoinField::Password,
+                    JoinField::Password => JoinField::Password,
+                };
+            }
+            ActiveTab::Relay => {}
+        }
+    }
+
+    /// 编辑模式下向前切换字段，到首位停止。
+    fn prev_field_clamped(&mut self) {
+        match self.tab {
+            ActiveTab::Host => {
+                self.host_field = match self.host_field {
+                    HostField::Port => HostField::Port,
+                    HostField::Password => HostField::Port,
+                };
+            }
+            ActiveTab::Join => {
+                self.join_field = match self.join_field {
+                    JoinField::Ticket => JoinField::Ticket,
+                    JoinField::Port => JoinField::Ticket,
+                    JoinField::Password => JoinField::Port,
+                };
+            }
+            ActiveTab::Relay => {}
+        }
+    }
+
+    /// 弹窗关闭时将 relay URL 写入配置文件（仅持久化，不切换中继）。
+    /// URL 为空或格式无效时记录日志但不中断流程。
+    fn persist_relay_url(&mut self) {
+        let url = self.relay_url.value.trim().to_string();
+        if url.is_empty() {
+            return;
+        }
+        let conf_path = config::default_relay_conf_path();
+        if let Err(e) = config::save_relay_url(&conf_path, &url) {
+            self.add_log(&format!("URL 格式无效，未保存: {e}"));
         }
     }
 
@@ -684,14 +741,15 @@ impl AppState {
     pub fn next_relay_selection(&mut self) {
         let next = match self.relay_state.selected() {
             Some(i) if i + 1 < RELAYS.len() => i + 1,
-            _ => 0,
+            Some(i) => i,
+            None => 0,
         };
         self.relay_state.select(Some(next));
     }
 
     pub fn prev_relay_selection(&mut self) {
         let prev = match self.relay_state.selected() {
-            Some(0) | None => RELAYS.len() - 1,
+            Some(0) | None => 0,
             Some(i) => i - 1,
         };
         self.relay_state.select(Some(prev));
