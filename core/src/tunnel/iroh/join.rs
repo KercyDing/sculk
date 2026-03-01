@@ -6,8 +6,6 @@ use super::auth::auth_send;
 use super::monitor::spawn_path_monitor;
 use super::transport::bridge;
 
-const DEFAULT_INITIAL_RETRIES: u32 = 3;
-
 /// Join 侧重连 supervisor。
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn reconnect_supervisor(
@@ -138,7 +136,7 @@ pub(super) async fn connect_with_retry(
     config: &TunnelConfig,
     tx: &mpsc::Sender<TunnelEvent>,
 ) -> anyhow::Result<Connection> {
-    let max = DEFAULT_INITIAL_RETRIES;
+    let max = config.initial_retries;
     let mut last_err = None;
 
     for attempt in 0..=max {

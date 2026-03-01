@@ -1,5 +1,4 @@
 mod app;
-mod clipboard;
 mod input;
 mod state;
 mod tunnel;

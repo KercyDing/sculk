@@ -1,6 +1,8 @@
 //! 系统剪贴板写入。
 
-/// 复制文本到系统剪贴板。
+/// 将文本写入系统剪贴板，成功返回 `true`。
+///
+/// Linux Wayland 下优先调用 `wl-copy`，X11 下调用 `xclip`，其余平台使用 `arboard`。
 pub fn clipboard_copy(text: &str) -> bool {
     #[cfg(target_os = "linux")]
     {

@@ -3708,7 +3708,6 @@ name = "sculk-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arboard",
  "clap",
  "sculk-core",
  "tokio",
@@ -3721,6 +3720,7 @@ name = "sculk-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "dirs",
  "iroh",
  "rand 0.10.0",
@@ -3736,7 +3736,6 @@ name = "sculk-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arboard",
  "crossterm",
  "futures",
  "ratatui",

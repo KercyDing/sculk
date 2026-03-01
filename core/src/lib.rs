@@ -51,11 +51,11 @@
 //! - `TunnelConfig::password` 是应用层校验，不替代传输层加密。
 //! - `join` 侧是否自动重连由 `max_retries` 控制。
 
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
 #[cfg(feature = "persist")]
 pub mod persist;
 pub mod tunnel;
-
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Minecraft 服务端标准端口。
 pub const DEFAULT_MC_PORT: u16 = 25565;

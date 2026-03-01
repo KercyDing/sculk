@@ -132,27 +132,7 @@ async fn capacity_check_with_grace(
     capacity_check_with_grace_delay(sessions, incoming_id, max_players, FULL_RECHECK_DELAY).await
 }
 
-#[cfg(test)]
 async fn capacity_check_with_grace_delay(
-    sessions: Arc<Mutex<HostSessions>>,
-    incoming_id: EndpointId,
-    max_players: Option<u32>,
-    recheck_delay: Duration,
-) -> bool {
-    capacity_check_with_grace_delay_impl(sessions, incoming_id, max_players, recheck_delay).await
-}
-
-#[cfg(not(test))]
-async fn capacity_check_with_grace_delay(
-    sessions: Arc<Mutex<HostSessions>>,
-    incoming_id: EndpointId,
-    max_players: Option<u32>,
-    recheck_delay: Duration,
-) -> bool {
-    capacity_check_with_grace_delay_impl(sessions, incoming_id, max_players, recheck_delay).await
-}
-
-async fn capacity_check_with_grace_delay_impl(
     sessions: Arc<Mutex<HostSessions>>,
     incoming_id: EndpointId,
     max_players: Option<u32>,

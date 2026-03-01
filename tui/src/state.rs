@@ -8,7 +8,6 @@ use ratatui::widgets::ListState;
 use sculk_core::tunnel::{IrohTunnel, TunnelEvent};
 use tokio::sync::mpsc;
 
-use crate::clipboard;
 use crate::input::InputField;
 use crate::tunnel::{self, AppEvent};
 
@@ -112,7 +111,10 @@ pub struct AppState {
 impl AppState {
     /// 从持久化 Profile 初始化状态，加载失败时回退到默认值。
     pub fn new(app_tx: mpsc::UnboundedSender<AppEvent>) -> Self {
-        let profile = sculk_core::persist::Profile::load().unwrap_or_default();
+        let (profile, profile_err) = match sculk_core::persist::Profile::load() {
+            Ok(p) => (p, None),
+            Err(e) => (Default::default(), Some(format!("配置加载失败: {e}"))),
+        };
 
         let relay_idx = if profile.relay.custom { 1 } else { 0 };
         let relay_url_value = profile.relay.url.clone().unwrap_or_default();
@@ -156,6 +158,9 @@ impl AppState {
         };
         state.relay_state.select(Some(relay_idx));
         state.add_log("已就绪，按 Enter 执行当前模式");
+        if let Some(err) = profile_err {
+            state.add_log(&err);
+        }
         state
     }
 
@@ -459,7 +464,7 @@ impl AppState {
                 self.tunnel = Some(tunnel);
 
                 let quoted = format!("\"{ticket}\"");
-                if clipboard::clipboard_copy(&quoted) {
+                if sculk_core::clipboard::clipboard_copy(&quoted) {
                     self.add_log("票据已复制到剪贴板");
                 }
                 self.ticket = Some(ticket.clone());

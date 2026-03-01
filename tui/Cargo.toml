@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sculk-core = { workspace = true, features = ["persist"] }
+sculk-core = { workspace = true, features = ["persist", "clipboard"] }
 anyhow.workspace = true
-arboard.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

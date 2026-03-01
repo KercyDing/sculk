@@ -14,8 +14,10 @@ pub struct TunnelConfig {
     pub event_delay: Duration,
     /// 连接密码，`None` 表示不校验。
     pub password: Option<String>,
-    /// 最大重连次数（仅 join 侧）：`None` 无限，`Some(0)` 关闭重连。
+    /// 最大重连次数（join 侧）：`None` 无限，`Some(0)` 关闭重连。
     pub max_retries: Option<u32>,
+    /// 首次连接的重试上限（join 侧），默认 3 次。
+    pub initial_retries: u32,
     /// 重连初始退避（仅 join 侧）。
     pub base_backoff: Duration,
     /// 重连最大退避（仅 join 侧）。
@@ -30,6 +32,7 @@ impl Default for TunnelConfig {
             event_delay: Duration::ZERO,
             password: None,
             max_retries: None,
+            initial_retries: 3,
             base_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
             max_players: None,
