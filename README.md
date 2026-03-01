@@ -42,13 +42,13 @@
 #### macOS / Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/install/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.sh | sh
 ```
 
 #### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.ps1 | iex
 ```
 
 脚本会交互式询问安装：
@@ -70,13 +70,13 @@ cargo install --path tui
 #### macOS / Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/uninstall/uninstall.sh | sh
+curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.sh | sh
 ```
 
 #### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/SeaLantern-Studio/sculk/main/scripts/uninstall/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.ps1 | iex
 ```
 
 ### Cargo 卸载（注意包名）
@@ -234,6 +234,10 @@ Release 会同时构建两个客户端（`sculk` + `sculk-tui`）：
 - 双方都在严格对称 NAT 时通常只能走 relay
 
 可用 `iroh doctor report` 观察 NAT 情况（例如 `mapping_varies_by_dest_ip`）。
+
+## 致谢
+
+特别为 [SeaLantern](https://github.com/SeaLantern-Studio/SeaLantern) 提供联机服务。
 
 ## 许可证
 

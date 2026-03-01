@@ -83,7 +83,7 @@ fi
 download_binary() {
     artifact="$1"
     target_name="$2"
-    url="https://github.com/SeaLantern-Studio/sculk/releases/latest/download/$artifact"
+    url="https://github.com/KercyDing/sculk/releases/latest/download/$artifact"
 
     echo "正在下载 $artifact..."
     temp_file="$(mktemp)"

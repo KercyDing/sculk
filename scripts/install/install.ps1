@@ -40,7 +40,7 @@ foreach ($component in $components) {
     } else {
         "sculk-tui-windows-amd64.exe"
     }
-    $downloadUrl = "https://github.com/SeaLantern-Studio/sculk/releases/latest/download/$artifact"
+    $downloadUrl = "https://github.com/KercyDing/sculk/releases/latest/download/$artifact"
     $installPath = Join-Path $INSTALL_DIR "$component.exe"
 
     Write-Host "正在下载 $artifact..." -ForegroundColor Green
