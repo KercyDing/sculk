@@ -11,7 +11,10 @@ use crate::state::{AppState, InputMode};
 pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
     if state.input_mode == InputMode::Editing {
         let footer = Paragraph::new(Line::from(vec![
-            Span::styled("编辑模式", Style::default().fg(INFO).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "编辑模式",
+                Style::default().fg(INFO).add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
             Span::styled("q", Style::default().fg(ACCENT)),
             Span::raw(" 退出编辑  "),
@@ -44,7 +47,7 @@ pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
     .style(Style::default().bg(PANEL));
     frame.render_widget(footer, area);
 
-    if state.quit_pending {
+    if state.quit_pressed_at.is_some() {
         let hint = Paragraph::new(Line::from(vec![Span::styled(
             "再次按 Esc 退出",
             Style::default().fg(ERROR).add_modifier(Modifier::BOLD),

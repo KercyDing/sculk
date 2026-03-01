@@ -81,14 +81,10 @@ impl InputField {
         self.cursor = self.value.len();
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.value.clear();
         self.cursor = 0;
-    }
-
-    pub fn set_value(&mut self, val: &str) {
-        self.value = val.to_string();
-        self.cursor = self.value.len();
     }
 }
 

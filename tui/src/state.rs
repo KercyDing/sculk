@@ -1,6 +1,7 @@
 //! 应用状态机、键盘处理与日志管理。
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
@@ -14,7 +15,7 @@ use crate::tunnel::{self, AppEvent};
 
 pub const LOG_CAP: usize = 200;
 pub const TAB_TITLES: [&str; 3] = ["建房", "加入", "中继"];
-pub const RELAYS: [&str; 3] = ["n0 默认中继", "亚洲中继池", "自建中继"];
+pub const RELAYS: [&str; 2] = ["n0 默认中继", "自建中继"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTab {
@@ -62,18 +63,13 @@ pub enum JoinField {
     Password,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RelayField {
-    Url,
-}
-
 pub struct AppState {
     pub show_help: bool,
     pub tick: u64,
     pub tab: ActiveTab,
     pub focus: FocusPane,
     pub input_mode: InputMode,
-    pub quit_pending: bool,
+    pub quit_pressed_at: Option<Instant>,
     pub logs: Vec<String>,
     pub log_state: ListState,
     pub relay_state: ListState,
@@ -102,22 +98,28 @@ pub struct AppState {
 
     // Relay tab 输入字段
     pub relay_url: InputField,
-    pub relay_field: RelayField,
 }
 
 impl AppState {
     pub fn new(app_tx: mpsc::UnboundedSender<AppEvent>) -> Self {
+        // 从配置文件加载中继设置
+        let (relay_idx, relay_url_value) =
+            match config::load_relay_url(&config::default_relay_conf_path()) {
+                Ok(Some(url)) => (1, url.to_string()),
+                _ => (0, String::new()),
+            };
+
         let mut state = Self {
             show_help: false,
             tick: 0,
             tab: ActiveTab::Host,
             focus: FocusPane::Profile,
             input_mode: InputMode::Normal,
-            quit_pending: false,
+            quit_pressed_at: None,
             logs: Vec::new(),
             log_state: ListState::default(),
             relay_state: ListState::default(),
-            relay_idx: 0,
+            relay_idx,
 
             phase: TunnelPhase::Idle,
             active_mode: None,
@@ -136,35 +138,40 @@ impl AppState {
             join_password: InputField::new("密码"),
             join_field: JoinField::Ticket,
 
-            relay_url: InputField::new("URL"),
-            relay_field: RelayField::Url,
+            relay_url: InputField::with_value("URL", &relay_url_value),
         };
-        state.relay_state.select(Some(0));
+        state.relay_state.select(Some(relay_idx));
         state.add_log("已就绪，按 Enter 执行当前模式");
         state
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.phase == TunnelPhase::Active
     }
 
     // ---- 键盘处理 ----
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Step {
         if self.input_mode == InputMode::Editing {
-            self.quit_pending = false;
+            self.quit_pressed_at = None;
             return self.handle_editing_key(key);
         }
 
-        if key.code == KeyCode::Esc {
-            if self.quit_pending {
-                return Step::Exit;
-            } else {
-                self.quit_pending = true;
-                return Step::Continue;
+        if self.show_help {
+            // 帮助模式下 h 或 Esc 关闭帮助
+            if key.code == KeyCode::Char('h') || key.code == KeyCode::Esc {
+                self.show_help = false;
             }
+            return Step::Continue;
         }
-        self.quit_pending = false;
+
+        if key.code == KeyCode::Esc {
+            let now = Instant::now();
+            if let Some(prev) = self.quit_pressed_at
+                && now.duration_since(prev).as_secs() < 3
+            {
+                return Step::Exit;
+            }
+            self.quit_pressed_at = Some(now);
+            return Step::Continue;
+        }
+        self.quit_pressed_at = None;
 
         self.handle_normal_key(key)
     }
@@ -173,6 +180,10 @@ impl AppState {
         match key.code {
             KeyCode::Char('q') => {
                 self.input_mode = InputMode::Normal;
+                // 中继 tab 退出编辑时自动保存
+                if self.tab == ActiveTab::Relay {
+                    self.apply_relay();
+                }
             }
             KeyCode::Tab => {
                 self.next_field();
@@ -208,7 +219,7 @@ impl AppState {
 
     fn handle_normal_key(&mut self, key: KeyEvent) -> Step {
         match key.code {
-            KeyCode::Char('h') | KeyCode::Char('?') => {
+            KeyCode::Char('h') => {
                 self.show_help = !self.show_help;
                 Step::Continue
             }
@@ -301,7 +312,12 @@ impl AppState {
                     }
                 };
 
-                let relay_url = match config::resolve_relay_url(None) {
+                let custom_relay = if self.relay_idx == 1 {
+                    Some(self.relay_url.value.as_str())
+                } else {
+                    None
+                };
+                let relay_url = match config::resolve_relay_url(custom_relay) {
                     Ok(r) => r,
                     Err(e) => {
                         self.add_log(&format!("中继配置错误: {e}"));
@@ -318,7 +334,7 @@ impl AppState {
                 self.stop_tunnel();
             }
             _ => {
-                self.add_log("当前状态无法执行此操作");
+                self.add_log("隧道运行中，请先停止当前隧道");
             }
         }
     }
@@ -346,30 +362,59 @@ impl AppState {
                 self.phase = TunnelPhase::Starting;
                 self.active_mode = Some(ActiveTab::Join);
                 self.add_log("正在连接...");
-                tunnel::spawn_join(
-                    &self.join_ticket.value,
-                    port,
-                    password,
-                    self.app_tx.clone(),
-                );
+                tunnel::spawn_join(&self.join_ticket.value, port, password, self.app_tx.clone());
             }
             TunnelPhase::Active if self.active_mode == Some(ActiveTab::Join) => {
                 self.stop_tunnel();
             }
             _ => {
-                self.add_log("当前状态无法执行此操作");
+                self.add_log("隧道运行中，请先停止当前隧道");
             }
         }
     }
 
     fn apply_relay(&mut self) {
-        let selected = self.relay_state.selected().unwrap_or(self.relay_idx);
-        if selected != self.relay_idx {
-            self.relay_idx = selected;
-            self.add_log(&format!("中继已切换到 {}", RELAYS[self.relay_idx]));
-        } else {
-            self.add_log(&format!("中继保持不变: {}", RELAYS[self.relay_idx]));
+        if self.phase != TunnelPhase::Idle {
+            self.add_log("隧道运行中，无法切换中继");
+            return;
         }
+        let selected = self.relay_state.selected().unwrap_or(self.relay_idx);
+        let conf_path = config::default_relay_conf_path();
+
+        match selected {
+            0 => {
+                if selected == self.relay_idx {
+                    self.add_log(&format!("中继保持不变: {}", RELAYS[self.relay_idx]));
+                    return;
+                }
+                // n0 默认中继：删除自定义配置
+                if let Err(e) = config::remove_relay_config(&conf_path) {
+                    self.add_log(&format!("重置中继失败: {e}"));
+                    return;
+                }
+            }
+            1 => {
+                // 自建中继：保存用户输入的 URL
+                let url = self.relay_url.value.trim().to_string();
+                if url.is_empty() {
+                    self.add_log("请先输入自建中继 URL");
+                    return;
+                }
+                if let Err(e) = config::save_relay_url(&conf_path, &url) {
+                    self.add_log(&format!("保存失败: {e}"));
+                    return;
+                }
+            }
+            _ => {
+                if selected == self.relay_idx {
+                    self.add_log(&format!("中继保持不变: {}", RELAYS[self.relay_idx]));
+                    return;
+                }
+            }
+        }
+
+        self.relay_idx = selected;
+        self.add_log(&format!("中继已切换到 {}", RELAYS[self.relay_idx]));
     }
 
     fn stop_tunnel(&mut self) {
@@ -454,10 +499,16 @@ impl AppState {
 
     pub fn on_tick(&mut self) {
         self.tick = self.tick.saturating_add(1);
-        if self.phase == TunnelPhase::Active {
-            if let Some(ref tunnel) = self.tunnel {
-                self.connections = tunnel.connections();
-            }
+        // 3 秒超时自动清除 Esc 退出提示
+        if let Some(prev) = self.quit_pressed_at
+            && Instant::now().duration_since(prev).as_secs() >= 3
+        {
+            self.quit_pressed_at = None;
+        }
+        if self.phase == TunnelPhase::Active
+            && let Some(ref tunnel) = self.tunnel
+        {
+            self.connections = tunnel.connections();
         }
     }
 
@@ -479,8 +530,8 @@ impl AppState {
 
     pub fn route_strength(&self) -> u8 {
         if !self.connections.is_empty() {
-            let avg_rtt: u64 =
-                self.connections.iter().map(|c| c.rtt_ms).sum::<u64>() / self.connections.len() as u64;
+            let avg_rtt: u64 = self.connections.iter().map(|c| c.rtt_ms).sum::<u64>()
+                / self.connections.len() as u64;
             // RTT -> 质量百分比：0ms=98%, 500ms+=10%
             ((100_u64.saturating_sub(avg_rtt / 5)).clamp(10, 98)) as u8
         } else if self.phase == TunnelPhase::Active {
@@ -492,13 +543,38 @@ impl AppState {
 
     pub fn route_info(&self) -> &str {
         if let Some(conn) = self.connections.first() {
-            if conn.is_relay {
-                "中继"
-            } else {
-                "直连"
-            }
+            if conn.is_relay { "中继" } else { "直连" }
         } else {
             "无"
+        }
+    }
+
+    pub fn gauge_label(&self) -> String {
+        if self.connections.is_empty() {
+            if self.phase == TunnelPhase::Active {
+                "等待连接...".to_string()
+            } else {
+                "离线".to_string()
+            }
+        } else {
+            let avg_rtt: u64 = self.connections.iter().map(|c| c.rtt_ms).sum::<u64>()
+                / self.connections.len() as u64;
+            let mode = self.route_info();
+            format!(
+                "{}% | {}ms | {} | {}人",
+                self.route_strength(),
+                avg_rtt,
+                mode,
+                self.connections.len()
+            )
+        }
+    }
+
+    pub fn connection_label(&self) -> String {
+        if self.connections.is_empty() {
+            "0".to_string()
+        } else {
+            format!("{}", self.connections.len())
         }
     }
 
@@ -507,21 +583,6 @@ impl AppState {
     }
 
     // ---- 输入字段 ----
-
-    pub fn active_input(&self) -> &InputField {
-        match self.tab {
-            ActiveTab::Host => match self.host_field {
-                HostField::Port => &self.host_port,
-                HostField::Password => &self.host_password,
-            },
-            ActiveTab::Join => match self.join_field {
-                JoinField::Ticket => &self.join_ticket,
-                JoinField::Port => &self.join_port,
-                JoinField::Password => &self.join_password,
-            },
-            ActiveTab::Relay => &self.relay_url,
-        }
-    }
 
     fn active_input_mut(&mut self) -> &mut InputField {
         match self.tab {
@@ -687,14 +748,23 @@ mod tests {
     #[test]
     fn quit_keys_exit() {
         let mut state = test_state();
-        assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Continue));
-        assert!(state.quit_pending);
+        assert!(matches!(
+            state.handle_key(key(KeyCode::Esc)),
+            Step::Continue
+        ));
+        assert!(state.quit_pressed_at.is_some());
         assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Exit));
         // 编辑模式下 Esc 无效
         let mut state = test_state();
         state.input_mode = InputMode::Editing;
-        assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Continue));
-        assert!(matches!(state.handle_key(key(KeyCode::Esc)), Step::Continue));
+        assert!(matches!(
+            state.handle_key(key(KeyCode::Esc)),
+            Step::Continue
+        ));
+        assert!(matches!(
+            state.handle_key(key(KeyCode::Esc)),
+            Step::Continue
+        ));
     }
 
     #[test]
@@ -724,6 +794,7 @@ mod tests {
     fn relay_apply() {
         let mut state = test_state();
         state.tab = ActiveTab::Relay;
+        state.relay_url.value = "https://relay.example.com".to_string();
         let old = state.relay_idx;
         state.relay_state.select(Some((old + 1) % RELAYS.len()));
         state.primary_action();
@@ -778,5 +849,84 @@ mod tests {
         assert_eq!(state.input_mode, InputMode::Normal);
         state.handle_key(key(KeyCode::Char('e')));
         assert_eq!(state.input_mode, InputMode::Editing);
+    }
+
+    #[test]
+    fn route_strength_mapping() {
+        let mut state = test_state();
+        // 无连接 + Idle → 0
+        assert_eq!(state.route_strength(), 0);
+        assert_eq!(state.route_info(), "无");
+
+        // Active 无连接 → 50
+        state.phase = super::TunnelPhase::Active;
+        assert_eq!(state.route_strength(), 50);
+    }
+
+    #[test]
+    fn gauge_label_offline() {
+        let state = test_state();
+        assert_eq!(state.gauge_label(), "离线");
+    }
+
+    #[test]
+    fn gauge_label_active_waiting() {
+        let mut state = test_state();
+        state.phase = super::TunnelPhase::Active;
+        assert_eq!(state.gauge_label(), "等待连接...");
+    }
+
+    #[test]
+    fn status_label_phases() {
+        let mut state = test_state();
+        let (label, _) = state.status_label();
+        assert_eq!(label, "空闲");
+
+        state.phase = super::TunnelPhase::Starting;
+        let (label, _) = state.status_label();
+        assert_eq!(label, "连接中...");
+
+        state.phase = super::TunnelPhase::Active;
+        state.active_mode = Some(ActiveTab::Host);
+        let (label, _) = state.status_label();
+        assert_eq!(label, "托管中");
+
+        state.active_mode = Some(ActiveTab::Join);
+        let (label, _) = state.status_label();
+        assert_eq!(label, "已加入");
+    }
+
+    #[test]
+    fn handle_app_event_closed() {
+        use super::TunnelPhase;
+        use crate::tunnel::AppEvent;
+
+        let mut state = test_state();
+        state.phase = TunnelPhase::Active;
+        state.active_mode = Some(ActiveTab::Host);
+        state.ticket = Some("test".to_string());
+
+        state.handle_app_event(AppEvent::Closed);
+
+        assert_eq!(state.phase, TunnelPhase::Idle);
+        assert!(state.active_mode.is_none());
+        assert!(state.ticket.is_none());
+        assert!(state.connections.is_empty());
+    }
+
+    #[test]
+    fn handle_app_event_start_failed() {
+        use super::TunnelPhase;
+        use crate::tunnel::AppEvent;
+
+        let mut state = test_state();
+        state.phase = TunnelPhase::Starting;
+        state.active_mode = Some(ActiveTab::Host);
+
+        state.handle_app_event(AppEvent::StartFailed("test error".into()));
+
+        assert_eq!(state.phase, TunnelPhase::Idle);
+        assert!(state.active_mode.is_none());
+        assert!(state.logs.last().unwrap().contains("test error"));
     }
 }

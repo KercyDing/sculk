@@ -9,7 +9,7 @@ use super::theme::{ACCENT, PANEL, border_style};
 use crate::state::{AppState, FocusPane};
 
 pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
-    let sections = Layout::vertical([Constraint::Length(5), Constraint::Min(8)]).split(area);
+    let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(8)]).split(area);
     let strength = state.route_strength();
     let gauge = Gauge::default()
         .block(
@@ -21,7 +21,7 @@ pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppS
                 .border_style(border_style(false)),
         )
         .gauge_style(Style::default().fg(ACCENT).bg(Color::Rgb(12, 40, 30)))
-        .label(format!("{strength}%"))
+        .label(state.gauge_label())
         .percent(strength as u16);
     frame.render_widget(gauge, sections[0]);
 

@@ -17,14 +17,8 @@ pub fn render_header(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
             .add_modifier(Modifier::BOLD),
     );
 
-    let route = Span::styled(
-        state.route_info(),
-        Style::default().fg(Color::Cyan),
-    );
-    let relay = Span::styled(
-        state.relay_label(),
-        Style::default().fg(Color::Magenta),
-    );
+    let conn_count = Span::styled(state.connection_label(), Style::default().fg(Color::Cyan));
+    let relay = Span::styled(state.relay_label(), Style::default().fg(Color::Magenta));
 
     let line = Line::from(vec![
         Span::styled(
@@ -39,9 +33,9 @@ pub fn render_header(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
         Span::raw(" "),
         status,
         Span::raw("    "),
-        Span::styled("路由:", Style::default().fg(Color::DarkGray)),
+        Span::styled("连接:", Style::default().fg(Color::DarkGray)),
         Span::raw(" "),
-        route,
+        conn_count,
         Span::raw("    "),
         Span::styled("中继:", Style::default().fg(Color::DarkGray)),
         Span::raw(" "),

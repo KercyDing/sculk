@@ -11,8 +11,8 @@ use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::widgets::Block;
 
-use theme::BG;
 use crate::state::AppState;
+use theme::BG;
 
 /// 顶层渲染入口。
 pub fn render(frame: &mut ratatui::Frame<'_>, state: &mut AppState) {

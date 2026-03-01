@@ -5,19 +5,30 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Tabs};
 
-use super::theme::{ACCENT, INFO, PANEL_ALT, WARN, border_style};
+use super::theme::{ACCENT, INFO, LEFT_PANEL_BG, WARN, border_style};
 use crate::input::InputField;
 use crate::state::{
     ActiveTab, AppState, FocusPane, HostField, InputMode, JoinField, RELAYS, TAB_TITLES,
 };
 
 pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
+    // 先铺整块左侧背景，保证空白区域也保持深色。
+    frame.render_widget(
+        Block::default().style(Style::default().bg(LEFT_PANEL_BG)),
+        area,
+    );
+
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(8)]).split(area);
 
     let tabs = Tabs::new(TAB_TITLES)
         .select(state.tab.index())
-        .style(Style::default().fg(Color::Gray))
-        .highlight_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(Color::Gray).bg(LEFT_PANEL_BG))
+        .highlight_style(
+            Style::default()
+                .fg(ACCENT)
+                .bg(LEFT_PANEL_BG)
+                .add_modifier(Modifier::BOLD),
+        )
         .divider(" • ")
         .block(
             Block::default()
@@ -25,7 +36,7 @@ pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppSt
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(border_style(state.focus == FocusPane::Profile))
-                .style(Style::default().bg(PANEL_ALT)),
+                .style(Style::default().bg(LEFT_PANEL_BG)),
         );
     frame.render_widget(tabs, sections[0]);
 
@@ -33,7 +44,7 @@ pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppSt
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style(state.focus == FocusPane::Profile))
-        .style(Style::default().bg(PANEL_ALT));
+        .style(Style::default().bg(LEFT_PANEL_BG));
 
     match state.tab {
         ActiveTab::Host => {
@@ -71,10 +82,16 @@ fn render_host_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("角色: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "角色: ",
+                Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+            ),
             Span::styled(
                 "建房",
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(ACCENT)
+                    .bg(LEFT_PANEL_BG)
+                    .add_modifier(Modifier::BOLD),
             ),
         ])),
         rows[0],
@@ -103,7 +120,10 @@ fn render_host_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
         "e 编辑 | ↑/↓ 切换字段"
     };
     frame.render_widget(
-        Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+        Paragraph::new(Span::styled(
+            hint,
+            Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+        )),
         rows[5],
     );
 }
@@ -123,10 +143,16 @@ fn render_join_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("角色: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "角色: ",
+                Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+            ),
             Span::styled(
                 "加入",
-                Style::default().fg(INFO).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(INFO)
+                    .bg(LEFT_PANEL_BG)
+                    .add_modifier(Modifier::BOLD),
             ),
         ])),
         rows[0],
@@ -162,7 +188,10 @@ fn render_join_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
         "e 编辑 | ↑/↓ 切换字段"
     };
     frame.render_widget(
-        Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+        Paragraph::new(Span::styled(
+            hint,
+            Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+        )),
         rows[6],
     );
 }
@@ -173,7 +202,7 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
         Constraint::Length(1), // 空行
         Constraint::Length(1), // 中继项 0
         Constraint::Length(1), // 中继项 1
-        Constraint::Length(1), // 中继项 2
+        Constraint::Length(1), // URL 输入框
         Constraint::Length(1), // 空行
         Constraint::Length(1), // 提示
         Constraint::Min(0),
@@ -182,11 +211,15 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("角色: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "角色: ",
+                Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+            ),
             Span::styled(
                 "中继",
                 Style::default()
                     .fg(Color::Magenta)
+                    .bg(LEFT_PANEL_BG)
                     .add_modifier(Modifier::BOLD),
             ),
         ])),
@@ -204,11 +237,11 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
         let suffix = if is_applied { " (已应用)" } else { "" };
 
         let style = if is_selected {
-            Style::default().fg(ACCENT)
+            Style::default().fg(ACCENT).bg(LEFT_PANEL_BG)
         } else if is_applied {
-            Style::default().fg(Color::White)
+            Style::default().fg(Color::White).bg(LEFT_PANEL_BG)
         } else {
-            Style::default().fg(Color::Gray)
+            Style::default().fg(Color::Gray).bg(LEFT_PANEL_BG)
         };
 
         frame.render_widget(
@@ -217,10 +250,21 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
         );
     }
 
+    // 选中"自建中继"时显示 URL 输入框
+    if selected_idx == 1 {
+        let editing = state.input_mode == InputMode::Editing;
+        render_field_line(frame, rows[4], &state.relay_url, focused, editing);
+    }
+
+    let hint = if state.input_mode == InputMode::Editing && selected_idx == 1 {
+        "q 退出并应用"
+    } else {
+        "Enter 应用 | ↑/↓ 选择 | e 编辑URL"
+    };
     frame.render_widget(
         Paragraph::new(Span::styled(
-            "Enter 应用 | ↑/↓ 选择",
-            Style::default().fg(Color::DarkGray),
+            hint,
+            Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
         )),
         rows[6],
     );
@@ -237,18 +281,18 @@ fn render_field_line(
     editing: bool,
 ) {
     let label_width = 8u16;
-    let cols = Layout::horizontal([
-        Constraint::Length(label_width),
-        Constraint::Min(4),
-    ])
-    .split(area);
+    let cols =
+        Layout::horizontal([Constraint::Length(label_width), Constraint::Min(4)]).split(area);
 
     let label_style = if editing {
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(ACCENT)
+            .bg(LEFT_PANEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else if selected {
-        Style::default().fg(ACCENT)
+        Style::default().fg(ACCENT).bg(LEFT_PANEL_BG)
     } else {
-        Style::default().fg(WARN)
+        Style::default().fg(WARN).bg(LEFT_PANEL_BG)
     };
 
     let marker = if selected || editing { "▶ " } else { "  " };
@@ -267,7 +311,10 @@ fn render_field_line(
     let (display, cursor_offset) = if field.value.is_empty() && !editing {
         ("(空)".to_string(), 0)
     } else if char_count <= max_w {
-        (field.value.clone(), field.value[..field.cursor].chars().count())
+        (
+            field.value.clone(),
+            field.value[..field.cursor].chars().count(),
+        )
     } else if editing {
         // 编辑模式：保持光标可见的滑动窗口
         let cursor_char = field.value[..field.cursor].chars().count();
@@ -289,16 +336,14 @@ fn render_field_line(
     let value_style = if editing {
         Style::default()
             .fg(Color::White)
+            .bg(LEFT_PANEL_BG)
             .add_modifier(Modifier::UNDERLINED)
     } else if selected {
-        Style::default().fg(Color::White)
+        Style::default().fg(Color::White).bg(LEFT_PANEL_BG)
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(Color::Gray).bg(LEFT_PANEL_BG)
     };
-    frame.render_widget(
-        Paragraph::new(Span::styled(display, value_style)),
-        cols[1],
-    );
+    frame.render_widget(Paragraph::new(Span::styled(display, value_style)), cols[1]);
 
     if editing {
         frame.set_cursor_position((cols[1].x + cursor_offset as u16, cols[1].y));

@@ -3,7 +3,7 @@
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
 use super::theme::{ACCENT, INFO, PANEL_ALT};
 use crate::state::AppState;
@@ -24,25 +24,64 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         .border_style(Style::default().fg(INFO));
     frame.render_widget(block, popup);
 
+    let key_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+    let sep = Style::default().fg(ratatui::style::Color::DarkGray);
+
     let help = Paragraph::new(Text::from(vec![
         Line::from(Span::styled(
             "SCULK TUI 快捷键",
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
-        Line::raw("Enter          : 执行当前模式（建房/加入/应用中继）"),
-        Line::raw("Left / Right   : 切换 建房 / 加入 / 中继 模式"),
-        Line::raw("Tab            : 在 概要 与 日志 间切换焦点"),
-        Line::raw("Up / Down      : 切换字段 / 选择中继 / 浏览日志"),
-        Line::raw("e              : 进入编辑模式"),
-        Line::raw("q              : 退出编辑模式"),
-        Line::raw("c              : 清空日志"),
-        Line::raw("h / ?          : 显示或关闭帮助"),
-        Line::raw("Esc (连按两次) : 退出程序"),
+        Line::from(vec![
+            Span::styled("Enter", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("执行当前模式"),
+        ]),
+        Line::from(vec![
+            Span::styled("←/→", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("切换模式"),
+        ]),
+        Line::from(vec![
+            Span::styled("Tab", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("切换焦点"),
+        ]),
+        Line::from(vec![
+            Span::styled("↑/↓", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("字段/中继/日志"),
+        ]),
+        Line::from(vec![
+            Span::styled("e", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("进入编辑"),
+        ]),
+        Line::from(vec![
+            Span::styled("q", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("退出编辑"),
+        ]),
+        Line::from(vec![
+            Span::styled("c", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("清空日志"),
+        ]),
+        Line::from(vec![
+            Span::styled("h", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("开关帮助"),
+        ]),
+        Line::from(vec![
+            Span::styled("Esc×2", key_style),
+            Span::styled(" — ", sep),
+            Span::raw("退出程序"),
+        ]),
         Line::raw(""),
-        Line::raw("建房模式下 Enter 启动/停止隧道，票据自动复制到剪贴板。"),
-    ]))
-    .wrap(Wrap { trim: true });
+        Line::raw("建房 Enter 启动/停止隧道，"),
+        Line::raw("票据自动复制到剪贴板。"),
+    ]));
     frame.render_widget(help, popup.inner(Margin::new(1, 1)));
 }
 
