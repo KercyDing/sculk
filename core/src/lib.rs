@@ -3,14 +3,14 @@
 //! 基于 [`iroh`](https://iroh.computer) 提供端到端加密的 QUIC 连接，
 //! 封装了 host/join 双端流程、票据编码、事件流与自动重连能力。
 //!
-//! # 核心入口
+//! # Overview
 //!
 //! - [`tunnel::IrohTunnel`]：创建 host 或 join 隧道。
 //! - [`tunnel::Ticket`]：`sculk://` 连接票据（可序列化分享）。
 //! - [`tunnel::TunnelConfig`]：密码、重连、人数上限、事件节流等配置。
 //! - [`tunnel::TunnelEvent`]：运行时状态与错误事件。
 //!
-//! # 最小示例
+//! # Examples
 //!
 //! Host 端：
 //!
@@ -45,18 +45,20 @@
 //! # }
 //! ```
 //!
-//! # 行为边界
+//! # Notes
 //!
 //! - `TunnelConfig::max_players` 按唯一 `EndpointId` 计数。
 //! - `TunnelConfig::password` 是应用层校验，不替代传输层加密。
 //! - `join` 侧是否自动重连由 `max_retries` 控制。
 
+#[cfg(feature = "persist")]
+pub mod persist;
 pub mod tunnel;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// 默认 MC 服务端端口
+/// Minecraft 服务端标准端口。
 pub const DEFAULT_MC_PORT: u16 = 25565;
 
-/// 默认本地监听端口（玩家端 Inlet）
+/// join 端本地入站监听端口默认值。
 pub const DEFAULT_INLET_PORT: u16 = 30000;

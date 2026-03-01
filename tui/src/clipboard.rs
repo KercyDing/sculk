@@ -1,4 +1,4 @@
-//! 剪贴板操作（移植自 cli/app.rs）。
+//! 系统剪贴板写入。
 
 /// 复制文本到系统剪贴板。
 pub fn clipboard_copy(text: &str) -> bool {

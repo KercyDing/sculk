@@ -4,14 +4,20 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+default = []
 ci = []
+persist = ["dep:dirs", "dep:rand", "dep:serde", "dep:toml"]
 
 [dependencies]
 anyhow.workspace = true
 iroh.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-url = "2.5.8"
+url.workspace = true
+dirs = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
 
 [dev-dependencies]
-rand = "0.10.0"
+rand.workspace = true

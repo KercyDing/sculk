@@ -1,3 +1,5 @@
+//! 网络路径监控：监听 iroh 路径变化，派发 `PathChanged` 事件。
+
 use super::*;
 
 /// 监控路径变化并发送 `PathChanged` 事件。

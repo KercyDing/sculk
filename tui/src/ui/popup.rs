@@ -103,7 +103,7 @@ pub fn centered_rect(width_percent: u16, height_percent: u16, area: Rect) -> Rec
     .split(vertical[1])[1]
 }
 
-/// 编辑弹窗：InputMode::Editing 时覆盖主面板，lazyvim 风格。
+/// 编辑弹窗
 pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
     if state.input_mode != InputMode::Editing {
         return;
@@ -112,7 +112,7 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     let fields = edit_fields(state);
     let popup_h = (fields.len() * 3 + 4) as u16;
 
-    // 垂直居中（绝对高度）
+    // 垂直居中
     let vert = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(popup_h),
@@ -120,7 +120,7 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     ])
     .split(area);
 
-    // 水平居中（60% 宽度）
+    // 水平居中
     let horiz = Layout::horizontal([
         Constraint::Fill(1),
         Constraint::Percentage(60),
@@ -145,10 +145,8 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         .border_style(Style::default().fg(ACCENT));
     frame.render_widget(block, popup);
 
-    // inner 减去边框后再加 2 列内边距
     let inner = popup.inner(Margin::new(2, 1));
 
-    // 1 顶部空行 + 每字段 3 行（label/value/spacer）+ 1 hint 行
     let mut constraints = vec![Constraint::Length(1)];
     for _ in &fields {
         constraints.push(Constraint::Length(1));
@@ -180,10 +178,8 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         let (display, cursor_offset) = if *is_active {
             let cursor_char = field.value[..field.cursor].chars().count();
             if char_count == 0 {
-                // 空值时显示单空格让光标有位置
                 (" ".to_string(), 0usize)
             } else {
-                // 保持光标可见的滑动窗口
                 let start = if cursor_char >= max_w {
                     cursor_char - max_w + 1
                 } else {

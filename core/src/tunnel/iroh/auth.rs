@@ -1,3 +1,8 @@
+//! 应用层密码认证协议，用于 host/join 握手阶段。
+//!
+//! 协议格式：join 侧发送 `[AUTH_VERSION, ...password_bytes]`，
+//! host 侧验证后回写单字节 `AUTH_OK` 或 `AUTH_REJECTED`。
+
 use super::*;
 
 const AUTH_VERSION: u8 = 0x01;

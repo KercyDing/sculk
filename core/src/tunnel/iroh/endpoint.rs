@@ -1,6 +1,8 @@
+//! iroh `Endpoint` 构建辅助。
+
 use super::*;
 
-/// 构建 Endpoint builder，根据参数配置 secret key 和 relay 模式
+/// 构建 Endpoint，根据参数配置 secret key 和 relay 模式。
 pub(super) fn build_endpoint(
     secret_key: Option<SecretKey>,
     relay_url: Option<&RelayUrl>,

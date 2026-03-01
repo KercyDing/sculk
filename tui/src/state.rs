@@ -9,7 +9,6 @@ use sculk_core::tunnel::{IrohTunnel, TunnelEvent};
 use tokio::sync::mpsc;
 
 use crate::clipboard;
-use crate::config;
 use crate::input::InputField;
 use crate::tunnel::{self, AppEvent};
 
@@ -17,6 +16,7 @@ pub const LOG_CAP: usize = 200;
 pub const TAB_TITLES: [&str; 3] = ["建房", "加入", "中继"];
 pub const RELAYS: [&str; 2] = ["n0 默认中继", "自建中继"];
 
+/// 当前激活的顶栏标签页。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTab {
     Host,
@@ -24,18 +24,21 @@ pub enum ActiveTab {
     Relay,
 }
 
+/// 当前焦点所在的面板。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusPane {
     Profile,
     Logs,
 }
 
+/// 输入模式：Normal 为导航，Editing 为文本输入。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
     Editing,
 }
 
+/// 事件循环单步结果。
 pub enum Step {
     Continue,
     Exit,
@@ -50,12 +53,14 @@ pub enum TunnelPhase {
     Stopping,
 }
 
+/// Host 标签页中当前聚焦的输入字段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostField {
     Port,
     Password,
 }
 
+/// Join 标签页中当前聚焦的输入字段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinField {
     Ticket,
@@ -63,6 +68,7 @@ pub enum JoinField {
     Password,
 }
 
+/// TUI 应用的全量状态，持有隧道句柄、输入字段与持久化 Profile。
 pub struct AppState {
     pub show_help: bool,
     pub tick: u64,
@@ -82,7 +88,10 @@ pub struct AppState {
     pub ticket: Option<String>,
     pub app_tx: mpsc::UnboundedSender<AppEvent>,
 
-    // 连接快照（Active 时 on_tick 刷新）
+    // 持久化配置
+    profile: sculk_core::persist::Profile,
+
+    // 连接快照
     pub connections: Vec<sculk_core::tunnel::ConnectionSnapshot>,
 
     // Host tab 输入字段
@@ -101,13 +110,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 从持久化 Profile 初始化状态，加载失败时回退到默认值。
     pub fn new(app_tx: mpsc::UnboundedSender<AppEvent>) -> Self {
-        // 从配置文件加载中继设置
-        let (relay_idx, relay_url_value) =
-            match config::load_relay_url(&config::default_relay_conf_path()) {
-                Ok(Some(url)) => (1, url.to_string()),
-                _ => (0, String::new()),
-            };
+        let profile = sculk_core::persist::Profile::load().unwrap_or_default();
+
+        let relay_idx = if profile.relay.custom { 1 } else { 0 };
+        let relay_url_value = profile.relay.url.clone().unwrap_or_default();
+
+        let host_port_str = profile.host.port.to_string();
+        let join_port_str = profile.join.port.to_string();
+        let last_ticket = profile.join.last_ticket.clone().unwrap_or_default();
 
         let mut state = Self {
             show_help: false,
@@ -127,14 +139,16 @@ impl AppState {
             ticket: None,
             app_tx,
 
+            profile,
+
             connections: Vec::new(),
 
-            host_port: InputField::with_value("端口", "25565"),
+            host_port: InputField::with_value("端口", &host_port_str),
             host_password: InputField::new("密码"),
             host_field: HostField::Port,
 
-            join_ticket: InputField::new("票据"),
-            join_port: InputField::with_value("端口", "30000"),
+            join_ticket: InputField::with_value("票据", &last_ticket),
+            join_port: InputField::with_value("端口", &join_port_str),
             join_password: InputField::new("密码"),
             join_field: JoinField::Ticket,
 
@@ -145,8 +159,8 @@ impl AppState {
         state
     }
 
-    // ---- 键盘处理 ----
-
+    /// 键盘处理。
+    /// 处理键盘事件，返回 [`Step::Exit`] 时退出事件循环。
     pub fn handle_key(&mut self, key: KeyEvent) -> Step {
         if self.input_mode == InputMode::Editing {
             self.quit_pressed_at = None;
@@ -180,10 +194,7 @@ impl AppState {
         match key.code {
             KeyCode::Esc => {
                 self.input_mode = InputMode::Normal;
-                // 中继弹窗关闭时仅持久化 URL 文本，不切换中继（Enter 才应用）
-                if self.tab == ActiveTab::Relay {
-                    self.persist_relay_url();
-                }
+                self.persist_profile();
             }
             KeyCode::Up => {
                 self.prev_field_clamped();
@@ -283,6 +294,7 @@ impl AppState {
 
     // ---- 主要操作 ----
 
+    /// 根据当前标签页执行主操作：启动/停止隧道或应用中继配置。
     pub fn primary_action(&mut self) {
         match self.tab {
             ActiveTab::Host => self.toggle_host(),
@@ -307,8 +319,8 @@ impl AppState {
                     Some(self.host_password.value.clone())
                 };
 
-                let key_path = config::default_key_path();
-                let secret_key = match config::load_or_generate_key(&key_path) {
+                let key_path = sculk_core::persist::default_key_path();
+                let secret_key = match sculk_core::persist::load_or_generate_key(&key_path) {
                     Ok(k) => k,
                     Err(e) => {
                         self.add_log(&format!("密钥加载失败: {e}"));
@@ -321,7 +333,7 @@ impl AppState {
                 } else {
                     None
                 };
-                let relay_url = match config::resolve_relay_url(custom_relay) {
+                let relay_url = match self.profile.resolve_relay_url(custom_relay) {
                     Ok(r) => r,
                     Err(e) => {
                         self.add_log(&format!("中继配置错误: {e}"));
@@ -383,7 +395,6 @@ impl AppState {
             return;
         }
         let selected = self.relay_state.selected().unwrap_or(self.relay_idx);
-        let conf_path = config::default_relay_conf_path();
 
         match selected {
             0 => {
@@ -391,20 +402,25 @@ impl AppState {
                     self.add_log(&format!("中继保持不变: {}", RELAYS[self.relay_idx]));
                     return;
                 }
-                // n0 默认中继：删除自定义配置
-                if let Err(e) = config::remove_relay_config(&conf_path) {
+                self.profile.relay.custom = false;
+                if let Err(e) = self.profile.save() {
                     self.add_log(&format!("重置中继失败: {e}"));
                     return;
                 }
             }
             1 => {
-                // 自建中继：保存用户输入的 URL
                 let url = self.relay_url.value.trim().to_string();
                 if url.is_empty() {
                     self.add_log("请先输入自建中继 URL");
                     return;
                 }
-                if let Err(e) = config::save_relay_url(&conf_path, &url) {
+                if let Err(e) = self.profile.resolve_relay_url(Some(&url)) {
+                    self.add_log(&format!("保存失败: {e}"));
+                    return;
+                }
+                self.profile.relay.custom = true;
+                self.profile.relay.url = Some(url);
+                if let Err(e) = self.profile.save() {
                     self.add_log(&format!("保存失败: {e}"));
                     return;
                 }
@@ -431,6 +447,7 @@ impl AppState {
 
     // ---- 隧道事件处理 ----
 
+    /// 处理来自隧道任务的内部事件。
     pub fn handle_app_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::HostStarted {
@@ -445,7 +462,12 @@ impl AppState {
                 if clipboard::clipboard_copy(&quoted) {
                     self.add_log("票据已复制到剪贴板");
                 }
-                self.ticket = Some(ticket);
+                self.ticket = Some(ticket.clone());
+
+                // 持久化票据供下次加入方快速粘贴
+                self.profile.join.last_ticket = Some(ticket);
+                let _ = self.profile.save();
+
                 self.add_log("host 隧道已启动");
 
                 tunnel::spawn_event_forwarder(events, self.app_tx.clone());
@@ -501,6 +523,7 @@ impl AppState {
 
     // ---- tick ----
 
+    /// 定时刷新：递增 tick、清除超时退出提示、更新连接快照。
     pub fn on_tick(&mut self) {
         self.tick = self.tick.saturating_add(1);
         // 3 秒超时自动清除 Esc 退出提示
@@ -518,6 +541,7 @@ impl AppState {
 
     // ---- 状态展示辅助 ----
 
+    /// 返回当前状态标签文字与配色。
     pub fn status_label(&self) -> (&str, crate::ui::theme::StatusColor) {
         use crate::ui::theme::StatusColor;
         match self.phase {
@@ -532,6 +556,7 @@ impl AppState {
         }
     }
 
+    /// 连接质量百分比：0ms ≈ 98%，≥500ms → 10%，无连接且隧道活跃时返回 50。
     pub fn route_strength(&self) -> u8 {
         if !self.connections.is_empty() {
             let avg_rtt: u64 = self.connections.iter().map(|c| c.rtt_ms).sum::<u64>()
@@ -681,16 +706,22 @@ impl AppState {
         }
     }
 
-    /// 弹窗关闭时将 relay URL 写入配置文件（仅持久化，不切换中继）。
-    /// URL 为空或格式无效时记录日志但不中断流程。
-    fn persist_relay_url(&mut self) {
-        let url = self.relay_url.value.trim().to_string();
-        if url.is_empty() {
-            return;
+    /// 编辑退出时同步 UI 字段到 Profile 并持久化。
+    fn persist_profile(&mut self) {
+        if let Ok(port) = self.host_port.value.parse::<u16>() {
+            self.profile.host.port = port;
         }
-        let conf_path = config::default_relay_conf_path();
-        if let Err(e) = config::save_relay_url(&conf_path, &url) {
-            self.add_log(&format!("URL 格式无效，未保存: {e}"));
+        if let Ok(port) = self.join_port.value.parse::<u16>() {
+            self.profile.join.port = port;
+        }
+        let relay_url = self.relay_url.value.trim().to_string();
+        if relay_url.is_empty() {
+            self.profile.relay.url = None;
+        } else {
+            self.profile.relay.url = Some(relay_url);
+        }
+        if let Err(e) = self.profile.save() {
+            self.add_log(&format!("配置保存失败: {e}"));
         }
     }
 
@@ -702,6 +733,7 @@ impl AppState {
         self.add_log("日志已清空");
     }
 
+    /// 将日志追加到队列，超出 `LOG_CAP` 时丢弃最早的条目。
     pub fn add_log(&mut self, msg: &str) {
         self.logs.push(msg.to_string());
         if self.logs.len() > LOG_CAP {
@@ -757,6 +789,7 @@ impl AppState {
 }
 
 impl ActiveTab {
+    /// 返回标签页对应的数组下标，与 `TAB_TITLES` 对齐。
     pub fn index(self) -> usize {
         match self {
             ActiveTab::Host => 0,
@@ -765,6 +798,7 @@ impl ActiveTab {
         }
     }
 
+    /// 向右切换，到末尾时停止。
     pub fn next(self) -> Self {
         match self {
             ActiveTab::Host => ActiveTab::Join,
@@ -773,6 +807,7 @@ impl ActiveTab {
         }
     }
 
+    /// 向左切换，到首位时停止。
     pub fn prev(self) -> Self {
         match self {
             ActiveTab::Host => ActiveTab::Host,

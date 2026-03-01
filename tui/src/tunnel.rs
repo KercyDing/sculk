@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 /// TUI 内部事件。
 pub enum AppEvent {
-    /// 隧道事件（来自 sculk-core）
+    /// 隧道事件
     Tunnel(TunnelEvent),
     /// Host 启动成功
     HostStarted {
@@ -100,7 +100,7 @@ pub fn spawn_close(tunnel: Arc<IrohTunnel>, tx: mpsc::UnboundedSender<AppEvent>)
     });
 }
 
-/// 转发 sculk-core 事件到 AppEvent 通道。
+/// 转发事件到 AppEvent 通道。
 pub fn spawn_event_forwarder(
     mut events: mpsc::Receiver<TunnelEvent>,
     tx: mpsc::UnboundedSender<AppEvent>,

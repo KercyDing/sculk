@@ -1,3 +1,5 @@
+//! host 侧连接接受循环与玩家会话管理。
+
 use super::*;
 
 use super::auth::auth_verify;
@@ -177,7 +179,7 @@ async fn capacity_check_with_grace_delay_impl(
     has_capacity_or_reconnect(&guard)
 }
 
-/// 拒绝连接后异步 close 并等待 closed() 收敛。
+/// 拒绝连接后异步 close 并等待收敛。
 fn spawn_rejected_conn_cleanup(
     conn: Connection,
     code: VarInt,

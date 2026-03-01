@@ -1,7 +1,10 @@
+//! host 侧玩家会话索引，保证同一玩家重连时不重复触发 `PlayerJoined`。
+
 use std::collections::HashMap;
 
 use super::*;
 
+/// 单条会话记录。
 pub(super) struct SessionEntry {
     pub(super) generation: u64,
     pub(super) conn: Option<Connection>,

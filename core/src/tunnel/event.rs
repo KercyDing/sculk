@@ -1,11 +1,13 @@
 //! 隧道配置、运行时事件与连接快照类型。
 //!
-//! 调用方通过 [`TunnelConfig`] 输入策略，通过 `mpsc` 接收 [`TunnelEvent`]，
-//! 并可按需读取 [`ConnectionSnapshot`] 做状态展示或统计。
+//! 调用方通过 [`TunnelConfig`] 描述隧道行为策略，
+//! 通过 `mpsc::Receiver<TunnelEvent>` 接收运行时状态推送，
+//! 并可调用 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections)
+//! 获取 [`ConnectionSnapshot`] 用于指标展示。
 
 use std::time::{Duration, Instant};
 
-/// 隧道配置。
+/// 隧道行为配置，在创建 host 或 join 隧道时传入。
 #[derive(Debug, Clone)]
 pub struct TunnelConfig {
     /// `PathChanged` 发送策略：`ZERO` 仅变化时发送，非零按间隔发送。
@@ -35,49 +37,69 @@ impl Default for TunnelConfig {
     }
 }
 
-/// 隧道运行时事件（通过 `mpsc` 推送）。
+/// 隧道运行时事件，由后台任务通过 `mpsc::Sender` 推送给调用方。
+///
+/// host 侧接收玩家连接/断开/拒绝事件，join 侧接收连接/重连/断开事件，
+/// 双端均可收到 `PathChanged` 和 `Error`。
 #[derive(Debug, Clone)]
 pub enum TunnelEvent {
+    /// host 侧：新玩家建立连接。
     PlayerJoined {
         id: String,
     },
+    /// host 侧：玩家断开连接，`reason` 为 QUIC 层关闭原因。
     PlayerLeft {
         id: String,
         reason: String,
     },
+    /// join 侧：与 host 的 QUIC 连接已建立。
     Connected,
+    /// join 侧：与 host 的连接断开，`reason` 为关闭原因。若将重连，随后会发送 [`Self::Reconnecting`]。
     Disconnected {
         reason: String,
     },
+    /// 选中路径切换或 RTT 变化时触发，`event_delay` 控制发送节流。
     PathChanged {
         remote_id: String,
         is_relay: bool,
         rtt_ms: u64,
     },
+    /// join 侧：即将发起第 `attempt` 次重连。
     Reconnecting {
         attempt: u32,
     },
+    /// join 侧：重连成功。
     Reconnected,
+    /// host 侧：密码验证失败，连接已被关闭。
     AuthFailed {
         id: String,
     },
+    /// host 侧：连接被主动拒绝，如服务器满员时 `reason` 为 `"server full"`。
     PlayerRejected {
         id: String,
         reason: String,
     },
+    /// 非致命的内部或 I/O 错误，隧道仍在运行。
     Error {
         message: String,
     },
 }
 
-/// 连接状态快照，由 `IrohTunnel::connections()` 返回。
+/// 单条连接的瞬时状态快照，由 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections) 返回。
 #[derive(Debug, Clone)]
 pub struct ConnectionSnapshot {
+    /// 对端节点 ID 的简短形式，由 `EndpointId::fmt_short()` 生成。
     pub remote_id: String,
+    /// 当前路径是否经由 relay 转发，`false` 为直连。
     pub is_relay: bool,
+    /// 选中路径的往返延迟，单位毫秒。
     pub rtt_ms: u64,
+    /// 累计已发送 UDP 字节数。
     pub tx_bytes: u64,
+    /// 累计已接收 UDP 字节数。
     pub rx_bytes: u64,
+    /// 连接是否仍活跃。
     pub alive: bool,
+    /// 快照采样时刻。
     pub timestamp: Instant,
 }

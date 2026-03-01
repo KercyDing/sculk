@@ -1,6 +1,8 @@
+//! 双向字节流桥接：iroh QUIC 双向流与 TCP 连接互转。
+
 use super::*;
 
-/// 双向桥接：双向流 <-> TCP，任一方向断开则关闭
+/// 在 QUIC 双向流与 TCP 连接之间桥接数据，任一方向 EOF 或错误时关闭另一侧。
 pub(super) async fn bridge(
     mut send: SendStream,
     mut recv: RecvStream,

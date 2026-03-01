@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use anyhow::{Context, ensure};
-use sculk_core::tunnel::SecretKey;
+
+use crate::tunnel::SecretKey;
 
 const KEY_LEN: usize = 32;
 
@@ -16,10 +17,8 @@ pub fn load_or_generate_key(path: &Path) -> anyhow::Result<SecretKey> {
     }
 }
 
-/// 强制生成新密钥并保存（会覆盖已有文件）。
+/// 强制重新生成新密钥并保存。
 pub fn generate_new_key(path: &Path) -> anyhow::Result<SecretKey> {
-    // `iroh::SecretKey::generate` currently expects rand_core 0.9 traits, while this crate uses
-    // rand 0.10 APIs. Generate secure random key bytes with rand 0.10 and construct the key.
     let bytes: [u8; KEY_LEN] = rand::random();
     let key = SecretKey::from_bytes(&bytes);
     save_key(path, &key)?;
@@ -50,7 +49,6 @@ fn save_key(path: &Path, key: &SecretKey) -> anyhow::Result<()> {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
 
-        // Unix 下强制 0o600，避免私钥被其他用户读取。
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)

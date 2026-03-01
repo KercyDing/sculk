@@ -1,3 +1,5 @@
+//! join 侧连接、自动重连与本地 TCP 代理。
+
 use super::*;
 
 use super::auth::auth_send;
@@ -129,7 +131,7 @@ fn is_permanent_rejection(err: &ConnectionError) -> bool {
     }
 }
 
-/// 带重试的连接流程（含 auth）。
+/// 含 auth的重试连接流程。
 pub(super) async fn connect_with_retry(
     endpoint: &Endpoint,
     endpoint_id: iroh::EndpointId,
