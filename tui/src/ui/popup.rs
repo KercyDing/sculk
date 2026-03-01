@@ -166,10 +166,7 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        frame.render_widget(
-            Paragraph::new(Span::styled(*label, label_style)),
-            label_row,
-        );
+        frame.render_widget(Paragraph::new(Span::styled(*label, label_style)), label_row);
 
         let max_w = value_row.width as usize;
         let chars: Vec<char> = field.value.chars().collect();
@@ -227,10 +224,14 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
 }
 
 /// 返回当前 tab 的可编辑字段列表：(标签, 字段引用, 是否活跃)。
-fn edit_fields<'a>(state: &'a AppState) -> Vec<(&'static str, &'a InputField, bool)> {
+fn edit_fields(state: &AppState) -> Vec<(&'static str, &InputField, bool)> {
     match state.tab {
         ActiveTab::Host => vec![
-            ("端口", &state.host_port, state.host_field == HostField::Port),
+            (
+                "端口",
+                &state.host_port,
+                state.host_field == HostField::Port,
+            ),
             (
                 "密码",
                 &state.host_password,

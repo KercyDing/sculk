@@ -13,7 +13,7 @@ const PROFILE_FILE: &str = "profile.toml";
 ///
 /// 各字段均实现 [`Default`]，未出现在文件中的键自动取默认值，
 /// 因此增删字段不会导致旧版配置文件解析失败。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Profile {
     #[serde(default)]
     pub host: HostProfile,
@@ -43,7 +43,7 @@ pub struct JoinProfile {
 }
 
 /// relay 偏好配置，对应 `[relay]` TOML 节。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelayProfile {
     /// `true` 启用自建中继，`false` 使用 iroh 内置 n0 中继服务器组。
     #[serde(default)]
@@ -51,16 +51,6 @@ pub struct RelayProfile {
     /// 自建中继地址，仅 `custom = true` 时生效。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-}
-
-impl Default for Profile {
-    fn default() -> Self {
-        Self {
-            host: HostProfile::default(),
-            join: JoinProfile::default(),
-            relay: RelayProfile::default(),
-        }
-    }
 }
 
 impl Default for HostProfile {
@@ -76,15 +66,6 @@ impl Default for JoinProfile {
         Self {
             port: default_inlet_port(),
             last_ticket: None,
-        }
-    }
-}
-
-impl Default for RelayProfile {
-    fn default() -> Self {
-        Self {
-            custom: false,
-            url: None,
         }
     }
 }
@@ -149,12 +130,10 @@ impl Profile {
         &self,
         custom: Option<&str>,
     ) -> anyhow::Result<Option<crate::tunnel::RelayUrl>> {
-        let url_str = custom.or_else(|| {
-            if self.relay.custom {
-                self.relay.url.as_deref()
-            } else {
-                None
-            }
+        let url_str = custom.or(if self.relay.custom {
+            self.relay.url.as_deref()
+        } else {
+            None
         });
         match url_str {
             Some(s) => {
@@ -196,10 +175,7 @@ mod tests {
         assert_eq!(p2.host.port, 12345);
         assert_eq!(p2.join.last_ticket.as_deref(), Some("sculk://test"));
         assert!(p2.relay.custom);
-        assert_eq!(
-            p2.relay.url.as_deref(),
-            Some("https://relay.example.com")
-        );
+        assert_eq!(p2.relay.url.as_deref(), Some("https://relay.example.com"));
     }
 
     #[test]

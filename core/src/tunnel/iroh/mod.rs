@@ -25,8 +25,8 @@ mod session;
 mod transport;
 
 use endpoint::build_endpoint;
-use host::host_accept_loop;
-use join::{connect_with_retry, reconnect_supervisor};
+use host::{HostContext, host_accept_loop};
+use join::{JoinContext, connect_with_retry, reconnect_supervisor};
 use session::HostSessions;
 
 const ALPN: &[u8] = b"/sculk/tunnel/1";
@@ -65,18 +65,14 @@ impl IrohTunnel {
         let conns_clone = conns.clone();
         let sessions_clone = sessions.clone();
         tokio::spawn(async move {
-            if let Err(e) = host_accept_loop(
-                ep,
-                mc_port,
-                tx.clone(),
-                conns_clone,
-                sessions_clone,
-                config.event_delay,
-                config.password,
-                config.max_players,
-            )
-            .await
-            {
+            let ctx = HostContext {
+                conns: conns_clone,
+                sessions: sessions_clone,
+                event_delay: config.event_delay,
+                password: config.password,
+                max_players: config.max_players,
+            };
+            if let Err(e) = host_accept_loop(ep, mc_port, tx.clone(), ctx).await {
                 let _ = tx
                     .send(TunnelEvent::Error {
                         message: format!("host loop ended: {e}"),
@@ -114,17 +110,12 @@ impl IrohTunnel {
         let conns_clone = conns.clone();
         let endpoint_id = ticket.endpoint_id;
         tokio::spawn(async move {
-            reconnect_supervisor(
-                ep,
-                endpoint_id,
-                conn,
-                conn_info,
+            let ctx = JoinContext {
                 listener,
-                tx,
-                conns_clone,
+                conns: conns_clone,
                 config,
-            )
-            .await;
+            };
+            reconnect_supervisor(ep, endpoint_id, conn, conn_info, tx, ctx).await;
         });
 
         Ok((Self { endpoint, conns }, rx))

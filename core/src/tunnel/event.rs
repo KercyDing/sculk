@@ -47,20 +47,13 @@ impl Default for TunnelConfig {
 #[derive(Debug, Clone)]
 pub enum TunnelEvent {
     /// host 侧：新玩家建立连接。
-    PlayerJoined {
-        id: String,
-    },
+    PlayerJoined { id: String },
     /// host 侧：玩家断开连接，`reason` 为 QUIC 层关闭原因。
-    PlayerLeft {
-        id: String,
-        reason: String,
-    },
+    PlayerLeft { id: String, reason: String },
     /// join 侧：与 host 的 QUIC 连接已建立。
     Connected,
     /// join 侧：与 host 的连接断开，`reason` 为关闭原因。若将重连，随后会发送 [`Self::Reconnecting`]。
-    Disconnected {
-        reason: String,
-    },
+    Disconnected { reason: String },
     /// 选中路径切换或 RTT 变化时触发，`event_delay` 控制发送节流。
     PathChanged {
         remote_id: String,
@@ -68,24 +61,15 @@ pub enum TunnelEvent {
         rtt_ms: u64,
     },
     /// join 侧：即将发起第 `attempt` 次重连。
-    Reconnecting {
-        attempt: u32,
-    },
+    Reconnecting { attempt: u32 },
     /// join 侧：重连成功。
     Reconnected,
     /// host 侧：密码验证失败，连接已被关闭。
-    AuthFailed {
-        id: String,
-    },
+    AuthFailed { id: String },
     /// host 侧：连接被主动拒绝，如服务器满员时 `reason` 为 `"server full"`。
-    PlayerRejected {
-        id: String,
-        reason: String,
-    },
+    PlayerRejected { id: String, reason: String },
     /// 非致命的内部或 I/O 错误，隧道仍在运行。
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// 单条连接的瞬时状态快照，由 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections) 返回。

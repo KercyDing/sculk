@@ -5,7 +5,9 @@
 - `sculk-tui`：终端图形客户端（TUI）
 - `sculk-core`：可复用隧道核心库
 
-> 项目名来自 Minecraft 的幽匿（Sculk）。
+> Sculk（幽匿）是 Minecraft 深暗之域中悄然蔓延的脉络，无声地在节点间传递信号。
+> 
+> sculk 做的事类似——在玩家之间建立隐匿的隧道，让连接自然发生。
 
 ## 项目结构
 
@@ -26,116 +28,12 @@
 `join` 端把远端隧道映射到本地端口（默认 `30000`），MC 客户端连本地即可。
 链路优先直连（NAT 打洞），失败回退 relay。
 
-### 系统架构全景
+连接流程：
 
-```mermaid
-flowchart LR
-    subgraph U["用户入口"]
-        CLI["sculk CLI\nhost | join | relay"]
-        TUI["sculk-tui\n建房 | 加入 | 中继 | 日志"]
-    end
-
-    subgraph C["sculk-core"]
-        API["IrohTunnel::host / join"]
-        TICKET["Ticket\nsculk://<EndpointId>?relay=<url>"]
-        CFG["TunnelConfig\npassword / max_players / max_retries / event_delay"]
-        EVT["TunnelEvent\nConnected / Disconnected / PathChanged / Reconnecting / Error"]
-        SNAP["ConnectionSnapshot\nis_relay / rtt / tx / rx"]
-    end
-
-    subgraph P["本地持久化 data_dir()/sculk"]
-        KEY["secret.key\n32-byte SecretKey"]
-        RELAY["relay.conf\n自定义 Relay URL"]
-    end
-
-    subgraph N["网络层 (iroh + QUIC)"]
-        EPH["Host Endpoint"]
-        EPJ["Join Endpoint"]
-        RELAYNET["Relay\nn0 默认或自建"]
-    end
-
-    subgraph M["Minecraft TCP 转发"]
-        HOSTMC["房主服务端\n127.0.0.1:25565"]
-        JOININ["玩家入口\n127.0.0.1:30000"]
-    end
-
-    CLI --> API
-    TUI --> API
-    CLI --> CFG
-    TUI --> CFG
-    API --> TICKET
-    API --> EVT
-    API --> SNAP
-
-    CLI --> KEY
-    TUI --> KEY
-    CLI --> RELAY
-    TUI --> RELAY
-    KEY --> API
-    RELAY --> API
-
-    API --> EPH
-    API --> EPJ
-    EPH -->|直连 优先| EPJ
-    EPJ -->|直连 回程| EPH
-    EPH -->|中继 回退| RELAYNET
-    RELAYNET -->|中继 转发| EPH
-    EPJ -->|中继 回退| RELAYNET
-    RELAYNET -->|中继 转发| EPJ
-
-    HOSTMC -->|TCP| EPH
-    EPH -->|TCP| HOSTMC
-    JOININ -->|TCP| EPJ
-    EPJ -->|TCP| JOININ
-```
-
-### 建房/加入时序
-
-```mermaid
-sequenceDiagram
-    participant H as 房主 (sculk host / TUI 建房)
-    participant C as sculk-core
-    participant R as Relay (n0/自建)
-    participant J as 玩家 (sculk join / TUI 加入)
-    participant MCJ as 玩家 MC 客户端
-    participant MCH as 房主 MC 服务端
-
-    H->>C: 读取/生成 secret.key，解析 relay.conf
-    C-->>H: 生成 Ticket(sculk://...)
-    H->>J: 分享 Ticket
-    J->>C: join(ticket, local_port, config)
-    C->>C: 密码校验 + max_players 校验
-
-    alt NAT 打洞成功
-        C-->>J: 建立 QUIC 直连
-    else NAT 打洞失败
-        C->>R: 回退 relay
-        R-->>J: 建立 relay 路径
-    end
-
-    MCJ->>J: 连接 127.0.0.1:30000
-    J->>C: 转发为 QUIC stream
-    C->>MCH: 转发到 127.0.0.1:25565
-
-    C-->>H: TunnelEvent(PlayerJoined / PathChanged / Error ...)
-    C-->>J: TunnelEvent(Connected / Reconnecting / Disconnected ...)
-```
-
-### TUI 状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> Idle
-    Idle --> Starting: Enter(建房/加入)
-    Starting --> Active: HostStarted / JoinConnected
-    Starting --> Idle: StartFailed
-    Active --> Stopping: Enter(停止)
-    Stopping --> Idle: Closed
-    Idle --> Idle: 中继模式 Enter 应用 relay.conf
-    Active --> Active: TunnelEvent 更新日志与连接快照
-    Idle --> [*]: Esc 双击(3秒内)
-    Active --> [*]: Esc 双击(3秒内)
-```
+1. 房主启动 `sculk host`，读取/生成密钥，生成 `sculk://...` 票据并分享
+2. 玩家通过 `sculk join "sculk://..."` 连接，经密码校验和人数校验后建立 QUIC 隧道
+3. 隧道在两端之间双向转发 TCP 流量：玩家 MC 客户端 → 本地端口 → QUIC → 房主 MC 服务端
+4. 运行时通过 `TunnelEvent` 推送状态变化（玩家加入/离开、路径切换、重连等）
 
 ## 安装
 
@@ -195,10 +93,11 @@ cargo uninstall sculk-tui
 ### 建房
 
 ```sh
-sculk host -p 25565
+sculk host
 ```
 
 常用参数：
+- `-p <PORT>`：本地 MC 服务端端口（默认 25565）
 - `--new-key`：强制生成新密钥（ticket 会变）
 - `--key-path <PATH>`：自定义密钥路径
 - `--relay <URL>`：覆盖 relay（优先级高于配置文件）
@@ -208,10 +107,11 @@ sculk host -p 25565
 ### 加入
 
 ```sh
-sculk join "sculk://..." -p 30000
+sculk join "sculk://..."
 ```
 
 常用参数：
+- `-p <PORT>`：本地入站监听端口（默认 30000）
 - `--password <PWD>`：加入密码
 - `--max-retries <N>`：最大重连次数（不传=无限）
 
@@ -223,7 +123,8 @@ sculk relay --url https://your-relay.example.com
 sculk relay --reset
 ```
 
-优先级：命令行 `--relay` > 配置文件 > 默认 n0 relay。
+- relay 优先级：命令行 `--relay` > 配置文件 > 默认 n0 relay。
+- 确定后写入票据，join 端直接使用票据中的 relay。
 
 ## TUI 使用
 
@@ -251,12 +152,32 @@ sculk-tui
 ## 配置与数据目录
 
 默认位于系统 `data_dir()/sculk`：
-- `secret.key`：私钥文件
-- `relay.conf`：自定义中继地址
+- macOS：`~/Library/Application Support/sculk/`
+- Linux：`~/.local/share/sculk/`
+- Windows：`%APPDATA%\sculk\`
+
+文件列表：
+- `secret.key`：32 字节 iroh 私钥，持久化后 ticket 可跨重启保持稳定
+- `profile.toml`：用户偏好配置（端口、中继、上次票据等）
+
+`profile.toml` 结构示例：
+
+```toml
+[host]
+port = 25565
+
+[join]
+port = 30000
+last_ticket = "sculk://..."
+
+[relay]
+custom = false
+# url = "https://your-relay.example.com"
+```
 
 说明：
-- 私钥持久化后，ticket 可跨重启保持稳定
 - `--new-key` 会重置身份并改变 ticket
+- 未出现的字段自动取默认值，增删字段不会导致旧配置解析失败
 
 ## 开发
 
@@ -275,11 +196,12 @@ cargo install cargo-nextest --locked
 
 ```sh
 just check          # fmt + check + clippy
-just test           # 与 CI 对齐（离线优先）
+just test           # 离线测试
 just test-e2e       # 网络集成测试
 just test-all       # 全量测试
 just fmt            # 格式化
 just doc            # 生成文档
+just relay-build    # 交叉编译 iroh-relay
 
 just install        # 安装 sculk
 just install-tui    # 安装 sculk-tui
@@ -297,6 +219,10 @@ Release 会同时构建两个客户端（`sculk` + `sculk-tui`）：
 - macOS amd64：`sculk-darwin-amd64` / `sculk-tui-darwin-amd64`
 - macOS arm64：`sculk-darwin-arm64` / `sculk-tui-darwin-arm64`
 - Windows amd64：`sculk-windows-amd64.exe` / `sculk-tui-windows-amd64.exe`
+
+## 自建 Relay
+
+默认使用 n0 公共 relay，如需自建请参考 [部署文档](docs/deploy/service.md)。
 
 ## 网络与 NAT 说明
 

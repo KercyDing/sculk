@@ -7,17 +7,21 @@ use super::monitor::spawn_path_monitor;
 use super::session::HostSessions;
 use super::transport::bridge;
 
+/// Host 接受循环的运行时上下文。
+pub(super) struct HostContext {
+    pub(super) conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    pub(super) sessions: Arc<Mutex<HostSessions>>,
+    pub(super) event_delay: Duration,
+    pub(super) password: Option<String>,
+    pub(super) max_players: Option<u32>,
+}
+
 /// Host 侧连接循环。
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn host_accept_loop(
     endpoint: Endpoint,
     mc_port: u16,
     tx: mpsc::Sender<TunnelEvent>,
-    conns: Arc<Mutex<Vec<ConnectionInfo>>>,
-    sessions: Arc<Mutex<HostSessions>>,
-    event_delay: Duration,
-    password: Option<String>,
-    max_players: Option<u32>,
+    ctx: HostContext,
 ) -> anyhow::Result<()> {
     loop {
         let conn = endpoint
@@ -30,7 +34,9 @@ pub(super) async fn host_accept_loop(
         let remote_id = remote_endpoint_id.fmt_short().to_string();
         tracing::info!(remote = %remote_id, "player connected");
 
-        if !capacity_check_with_grace(sessions.clone(), remote_endpoint_id, max_players).await {
+        if !capacity_check_with_grace(ctx.sessions.clone(), remote_endpoint_id, ctx.max_players)
+            .await
+        {
             tracing::info!(remote = %remote_id, "server full, rejecting");
             let _ = tx
                 .send(TunnelEvent::PlayerRejected {
@@ -42,7 +48,7 @@ pub(super) async fn host_accept_loop(
             continue;
         }
 
-        if let Some(ref pwd) = password {
+        if let Some(ref pwd) = ctx.password {
             match auth_verify(&conn, pwd).await {
                 Ok(true) => {}
                 Ok(false) => {
@@ -69,7 +75,7 @@ pub(super) async fn host_accept_loop(
         }
 
         let (generation, is_reconnect, old_conn) = {
-            let mut guard = sessions.lock().unwrap();
+            let mut guard = ctx.sessions.lock().unwrap();
             guard.upsert(remote_endpoint_id, conn.clone())
         };
         if let Some(old_conn) = old_conn {
@@ -77,7 +83,7 @@ pub(super) async fn host_accept_loop(
         }
 
         let conn_info = conn.to_info();
-        conns.lock().unwrap().push(conn_info.clone());
+        ctx.conns.lock().unwrap().push(conn_info.clone());
 
         if is_reconnect {
             tracing::info!(remote = %remote_id, "player reconnected");
@@ -89,11 +95,11 @@ pub(super) async fn host_accept_loop(
                 .await;
         }
 
-        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone(), event_delay);
+        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone(), ctx.event_delay);
 
         let tx_left = tx.clone();
         let left_id = remote_id.clone();
-        let sessions_on_close = sessions.clone();
+        let sessions_on_close = ctx.sessions.clone();
         tokio::spawn(async move {
             let reason = match conn_info.closed().await {
                 Some((err, _stats)) => err.to_string(),

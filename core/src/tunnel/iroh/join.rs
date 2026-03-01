@@ -6,22 +6,26 @@ use super::auth::auth_send;
 use super::monitor::spawn_path_monitor;
 use super::transport::bridge;
 
+/// Join 重连 supervisor 的运行时上下文。
+pub(super) struct JoinContext {
+    pub(super) listener: Arc<TcpListener>,
+    pub(super) conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    pub(super) config: TunnelConfig,
+}
+
 /// Join 侧重连 supervisor。
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn reconnect_supervisor(
     endpoint: Endpoint,
     endpoint_id: iroh::EndpointId,
     mut conn: Connection,
     mut conn_info: ConnectionInfo,
-    listener: Arc<TcpListener>,
     tx: mpsc::Sender<TunnelEvent>,
-    conns: Arc<Mutex<Vec<ConnectionInfo>>>,
-    config: TunnelConfig,
+    ctx: JoinContext,
 ) {
     loop {
         let remote_id = conn.remote_id().fmt_short().to_string();
-        spawn_path_monitor(conn.clone(), remote_id, tx.clone(), config.event_delay);
-        let accept_handle = spawn_join_accept_loop(conn.clone(), listener.clone(), tx.clone());
+        spawn_path_monitor(conn.clone(), remote_id, tx.clone(), ctx.config.event_delay);
+        let accept_handle = spawn_join_accept_loop(conn.clone(), ctx.listener.clone(), tx.clone());
 
         let permanent_reject = if let Some((err, _stats)) = conn_info.closed().await {
             let rejected = is_permanent_rejection(&err);
@@ -41,7 +45,7 @@ pub(super) async fn reconnect_supervisor(
             return;
         }
 
-        if config.max_retries == Some(0) {
+        if ctx.config.max_retries == Some(0) {
             return;
         }
 
@@ -49,7 +53,7 @@ pub(super) async fn reconnect_supervisor(
         let reconnected = loop {
             attempt += 1;
 
-            if let Some(max) = config.max_retries
+            if let Some(max) = ctx.config.max_retries
                 && attempt > max
             {
                 let _ = tx
@@ -61,10 +65,10 @@ pub(super) async fn reconnect_supervisor(
             }
 
             let backoff = std::cmp::min(
-                config
+                ctx.config
                     .base_backoff
                     .saturating_mul(2u32.saturating_pow(attempt - 1)),
-                config.max_backoff,
+                ctx.config.max_backoff,
             );
 
             let _ = tx.send(TunnelEvent::Reconnecting { attempt }).await;
@@ -74,7 +78,7 @@ pub(super) async fn reconnect_supervisor(
 
             match endpoint.connect(endpoint_id, ALPN).await {
                 Ok(new_conn) => {
-                    if let Some(ref password) = config.password
+                    if let Some(ref password) = ctx.config.password
                         && let Err(e) = auth_send(&new_conn, password).await
                     {
                         tracing::warn!(attempt, "reconnect auth failed: {e}");
@@ -93,7 +97,7 @@ pub(super) async fn reconnect_supervisor(
         conn_info = conn.to_info();
 
         {
-            let mut g = conns.lock().unwrap();
+            let mut g = ctx.conns.lock().unwrap();
             g.retain(|c| c.is_alive());
             g.push(conn_info.clone());
         }
