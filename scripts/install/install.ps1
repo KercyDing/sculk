@@ -35,6 +35,22 @@ $INSTALL_DIR = "$env:LOCALAPPDATA\sculk"
 New-Item -ItemType Directory -Force -Path $INSTALL_DIR | Out-Null
 
 foreach ($component in $components) {
+    $cargoPath = Join-Path "$env:USERPROFILE\.cargo\bin" "$component.exe"
+    if (Test-Path $cargoPath) {
+        $pkgName = if ($component -eq "sculk") { "sculk-cli" } else { "sculk-tui" }
+        Write-Host "警告：检测到 $cargoPath，建议先执行 cargo uninstall $pkgName 避免冲突。" -ForegroundColor Yellow
+        $answer = Read-Host "是否继续安装？[y/N]"
+        if ($answer -notmatch '^[yY]') {
+            Write-Host "已跳过 $component" -ForegroundColor Cyan
+            continue
+        }
+        $delAnswer = Read-Host "是否删除 $cargoPath？[y/N]"
+        if ($delAnswer -match '^[yY]') {
+            Remove-Item -Path $cargoPath -Force
+            Write-Host "已删除 $cargoPath" -ForegroundColor Green
+        }
+    }
+
     $artifact = if ($component -eq "sculk") {
         "sculk-windows-amd64.exe"
     } else {

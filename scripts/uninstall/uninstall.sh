@@ -49,6 +49,11 @@ remove_binary() {
             found=1
         fi
     done
+    cargo_path="$HOME/.cargo/bin/$name"
+    if [ -f "$cargo_path" ]; then
+        echo "检测到 $cargo_path，由 cargo install 安装，请手动执行：cargo uninstall $([ "$name" = "sculk" ] && echo sculk-cli || echo sculk-tui)"
+        found=1
+    fi
     if [ "$found" -eq 0 ]; then
         echo "警告：常见路径中未找到 $name"
     fi
