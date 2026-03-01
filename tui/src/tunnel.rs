@@ -63,6 +63,7 @@ pub fn spawn_join(
     password: Option<String>,
     tx: mpsc::UnboundedSender<AppEvent>,
 ) {
+    let ticket_str = ticket_str.trim().trim_matches('"');
     let ticket_result: Result<Ticket, _> = ticket_str.parse();
     match ticket_result {
         Ok(ticket) => {

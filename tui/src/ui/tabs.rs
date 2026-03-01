@@ -115,9 +115,9 @@ fn render_host_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
     );
 
     let hint = if editing {
-        "q 退出编辑 | Tab 切换字段"
+        "Esc 退出编辑 | Tab 切换字段"
     } else {
-        "e 编辑 | ↑/↓ 切换字段"
+        "i 编辑 | ↑/↓ 切换字段"
     };
     frame.render_widget(
         Paragraph::new(Span::styled(
@@ -183,9 +183,9 @@ fn render_join_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSta
     );
 
     let hint = if editing {
-        "q 退出编辑 | Tab 切换字段"
+        "Esc 退出编辑 | Tab 切换字段"
     } else {
-        "e 编辑 | ↑/↓ 切换字段"
+        "i 编辑 | ↑/↓ 切换字段"
     };
     frame.render_widget(
         Paragraph::new(Span::styled(
@@ -257,9 +257,9 @@ fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppSt
     }
 
     let hint = if state.input_mode == InputMode::Editing && selected_idx == 1 {
-        "q 退出并应用"
+        "Esc 退出并应用"
     } else {
-        "Enter 应用 | ↑/↓ 选择 | e 编辑URL"
+        "Enter 应用 | ↑/↓ 选择 | i 编辑URL"
     };
     frame.render_widget(
         Paragraph::new(Span::styled(

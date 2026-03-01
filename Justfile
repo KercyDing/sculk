@@ -49,7 +49,7 @@ fmt:
 
 # 生成文档
 doc:
-    cargo doc --workspace --no-deps
+    cargo doc --workspace --no-deps --open
 
 # 内部: 交叉编译 iroh-relay
 [unix]

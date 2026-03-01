@@ -16,7 +16,7 @@ pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
                 Style::default().fg(INFO).add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled("q", Style::default().fg(ACCENT)),
+            Span::styled("Esc", Style::default().fg(ACCENT)),
             Span::raw(" 退出编辑  "),
             Span::styled("Tab", Style::default().fg(ACCENT)),
             Span::raw(" 下个字段  "),
@@ -30,7 +30,7 @@ pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Enter", Style::default().fg(ACCENT)),
         Span::raw(" 执行  "),
-        Span::styled("e", Style::default().fg(ACCENT)),
+        Span::styled("i", Style::default().fg(ACCENT)),
         Span::raw(" 编辑  "),
         Span::styled("←/→", Style::default().fg(ACCENT)),
         Span::raw(" 模式  "),

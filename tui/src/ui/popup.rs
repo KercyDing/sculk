@@ -54,12 +54,12 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
             Span::raw("字段/中继/日志"),
         ]),
         Line::from(vec![
-            Span::styled("e", key_style),
+            Span::styled("i", key_style),
             Span::styled(" — ", sep),
             Span::raw("进入编辑"),
         ]),
         Line::from(vec![
-            Span::styled("q", key_style),
+            Span::styled("Esc", key_style),
             Span::styled(" — ", sep),
             Span::raw("退出编辑"),
         ]),

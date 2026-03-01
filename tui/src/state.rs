@@ -178,7 +178,7 @@ impl AppState {
 
     fn handle_editing_key(&mut self, key: KeyEvent) -> Step {
         match key.code {
-            KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.input_mode = InputMode::Normal;
                 // 中继 tab 退出编辑时自动保存
                 if self.tab == ActiveTab::Relay {
@@ -263,7 +263,7 @@ impl AppState {
                 self.primary_action();
                 Step::Continue
             }
-            KeyCode::Char('e') => {
+            KeyCode::Char('i') => {
                 if self.focus == FocusPane::Profile {
                     self.input_mode = InputMode::Editing;
                 }
@@ -837,7 +837,7 @@ mod tests {
         state.handle_key(key(KeyCode::Char('8')));
         state.handle_key(key(KeyCode::Char('0')));
         assert_eq!(state.host_port.value, "80");
-        state.handle_key(key(KeyCode::Char('q')));
+        state.handle_key(key(KeyCode::Esc));
         assert_eq!(state.input_mode, InputMode::Normal);
     }
 
@@ -847,7 +847,7 @@ mod tests {
         state.focus = FocusPane::Profile;
         state.handle_key(key(KeyCode::Enter));
         assert_eq!(state.input_mode, InputMode::Normal);
-        state.handle_key(key(KeyCode::Char('e')));
+        state.handle_key(key(KeyCode::Char('i')));
         assert_eq!(state.input_mode, InputMode::Editing);
     }
 
