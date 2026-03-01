@@ -17,16 +17,44 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
+            package: sculk-cli
+            bin: sculk
             artifact: sculk-linux-amd64
           - target: x86_64-apple-darwin
             runner: macos-latest
+            package: sculk-cli
+            bin: sculk
             artifact: sculk-darwin-amd64
           - target: aarch64-apple-darwin
             runner: macos-latest
+            package: sculk-cli
+            bin: sculk
             artifact: sculk-darwin-arm64
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
+            package: sculk-cli
+            bin: sculk
             artifact: sculk-windows-amd64.exe
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            package: sculk-tui
+            bin: sculk-tui
+            artifact: sculk-tui-linux-amd64
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            package: sculk-tui
+            bin: sculk-tui
+            artifact: sculk-tui-darwin-amd64
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            package: sculk-tui
+            bin: sculk-tui
+            artifact: sculk-tui-darwin-arm64
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            package: sculk-tui
+            bin: sculk-tui
+            artifact: sculk-tui-windows-amd64.exe
 
     runs-on: ${{ matrix.runner }}
 
@@ -47,15 +75,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        run: cargo build -p sculk-cli --release --target ${{ matrix.target }}
+        run: cargo build -p ${{ matrix.package }} --release --target ${{ matrix.target }}
 
       - name: Rename artifact (unix)
         if: runner.os != 'Windows'
-        run: mv target/${{ matrix.target }}/release/sculk ${{ matrix.artifact }}
+        run: mv target/${{ matrix.target }}/release/${{ matrix.bin }} ${{ matrix.artifact }}
 
       - name: Rename artifact (windows)
         if: runner.os == 'Windows'
-        run: mv target/${{ matrix.target }}/release/sculk.exe ${{ matrix.artifact }}
+        run: mv target/${{ matrix.target }}/release/${{ matrix.bin }}.exe ${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4
         with:

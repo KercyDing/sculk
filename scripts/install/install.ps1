@@ -1,53 +1,76 @@
-# Check execution policy
+# 检查执行策略
 $executionPolicy = Get-ExecutionPolicy -Scope CurrentUser
 if ($executionPolicy -eq "Restricted" -or $executionPolicy -eq "Undefined") {
-    Write-Host "Error: PowerShell script execution is disabled on this system." -ForegroundColor Red
+    Write-Host "错误：当前系统已禁用 PowerShell 脚本执行。" -ForegroundColor Red
     Write-Host ""
-    Write-Host "To allow script execution, run the following command:" -ForegroundColor Yellow
+    Write-Host "如需允许执行脚本，请运行以下命令：" -ForegroundColor Yellow
     Write-Host "  Set-ExecutionPolicy RemoteSigned -Scope CurrentUser" -ForegroundColor White
     Write-Host ""
-    Write-Host "Then run this installation script again." -ForegroundColor Yellow
+    Write-Host "然后重新运行本安装脚本。" -ForegroundColor Yellow
     exit 1
 }
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "Downloading sculk for Windows..." -ForegroundColor Green
+Write-Host "请选择要安装的组件：" -ForegroundColor Cyan
+Write-Host "  1) sculk"
+Write-Host "  2) sculk-tui"
+Write-Host "  3) 全部 (默认)"
+$choice = Read-Host "输入选项 [1/2/3]"
+if ([string]::IsNullOrWhiteSpace($choice)) {
+    $choice = "3"
+}
 
-$DOWNLOAD_URL = "https://github.com/SeaLantern-Studio/sculk/releases/latest/download/sculk-windows-amd64.exe"
+$components = switch ($choice) {
+    "1" { @("sculk") }
+    "2" { @("sculk-tui") }
+    "3" { @("sculk", "sculk-tui") }
+    default {
+        Write-Host "错误：无效选项 '$choice'" -ForegroundColor Red
+        exit 1
+    }
+}
+
 $INSTALL_DIR = "$env:LOCALAPPDATA\sculk"
-$INSTALL_PATH = "$INSTALL_DIR\sculk.exe"
-
-# Create install directory
 New-Item -ItemType Directory -Force -Path $INSTALL_DIR | Out-Null
 
-# Download binary
-try {
-    Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $INSTALL_PATH -UseBasicParsing
-} catch {
-    Write-Host "Error: Failed to download sculk" -ForegroundColor Red
-    exit 1
+foreach ($component in $components) {
+    $artifact = if ($component -eq "sculk") {
+        "sculk-windows-amd64.exe"
+    } else {
+        "sculk-tui-windows-amd64.exe"
+    }
+    $downloadUrl = "https://github.com/SeaLantern-Studio/sculk/releases/latest/download/$artifact"
+    $installPath = Join-Path $INSTALL_DIR "$component.exe"
+
+    Write-Host "正在下载 $artifact..." -ForegroundColor Green
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $installPath -UseBasicParsing
+    } catch {
+        Write-Host "错误：下载 $artifact 失败" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "$component 已安装到 $installPath" -ForegroundColor Green
 }
 
-Write-Host "sculk installed to $INSTALL_PATH" -ForegroundColor Green
-
-# Add to PATH if not already present
+# 如未存在则添加到 PATH
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$INSTALL_DIR*") {
-    Write-Host "Adding $INSTALL_DIR to PATH..." -ForegroundColor Yellow
+    Write-Host "正在将 $INSTALL_DIR 添加到 PATH..." -ForegroundColor Yellow
     [Environment]::SetEnvironmentVariable("Path", "$userPath;$INSTALL_DIR", "User")
     $env:Path = "$env:Path;$INSTALL_DIR"
-    Write-Host "PATH updated." -ForegroundColor Green
+    Write-Host "PATH 已更新。" -ForegroundColor Green
 }
 
-# Verify installation
 Write-Host ""
-try {
-    $version = & sculk --version
-    Write-Host "Verification: $version" -ForegroundColor Green
-} catch {
-    Write-Host "Please restart your terminal to use sculk." -ForegroundColor Cyan
+foreach ($component in $components) {
+    try {
+        $version = & $component --version
+        Write-Host "验证 ($component): $version" -ForegroundColor Green
+    } catch {
+        Write-Host "$component 已安装，请重启终端后使用。" -ForegroundColor Cyan
+    }
 }
 Write-Host ""
-Write-Host "sculk installed successfully!" -ForegroundColor Green
+Write-Host "安装完成。" -ForegroundColor Green
 Write-Host ""

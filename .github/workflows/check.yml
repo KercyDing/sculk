@@ -25,6 +25,8 @@ jobs:
 
       - run: cargo check --workspace
 
+      - run: cargo build --workspace --bins
+
       - run: cargo clippy --workspace -- -D warnings
 
       - run: cargo test --workspace --features sculk-core/ci
