@@ -1,9 +1,12 @@
 //! 单行文本输入组件。
 
+/// 输入值最大字节长度，防止异常输入耗尽内存。
+const INPUT_MAX_BYTES: usize = 4096;
+
 /// 单行文本输入字段。
 pub struct InputField {
     pub value: String,
-    pub cursor: usize,
+    pub(crate) cursor: usize,
     pub label: &'static str,
 }
 
@@ -26,6 +29,9 @@ impl InputField {
     }
 
     pub fn insert(&mut self, c: char) {
+        if self.value.len() + c.len_utf8() > INPUT_MAX_BYTES {
+            return;
+        }
         self.value.insert(self.cursor, c);
         self.cursor += c.len_utf8();
     }

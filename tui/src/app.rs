@@ -53,5 +53,16 @@ pub async fn run_tui() -> anyhow::Result<()> {
         }
     }
 
+    // 清理异步资源
+    if let Some(handle) = state.ctx.startup_handle.take() {
+        handle.abort();
+    }
+    if let Some(handle) = state.ctx.event_forwarder.take() {
+        handle.abort();
+    }
+    if let Some(tunnel) = state.ctx.tunnel.take() {
+        let _ = tokio::time::timeout(Duration::from_secs(3), tunnel.close()).await;
+    }
+
     Ok(())
 }

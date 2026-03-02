@@ -163,7 +163,8 @@ async fn capacity_check_with_grace_delay(
     };
 
     let has_capacity_or_reconnect = |guard: &HostSessions| {
-        guard.contains(&incoming_id) || (guard.active_players() as u32) < max
+        guard.contains(&incoming_id)
+            || u32::try_from(guard.active_players()).unwrap_or(u32::MAX) < max
     };
 
     {

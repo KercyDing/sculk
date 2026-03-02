@@ -78,17 +78,11 @@ impl AppState {
         let (profile, profile_err) = crate::services::persist::load_profile();
 
         let relay_idx = if profile.relay.custom { 1 } else { 0 };
-        let relay_url_value = match profile.relay.url.clone() {
-            Some(url) => url,
-            None => String::new(),
-        };
+        let relay_url_value: String = profile.relay.url.clone().unwrap_or_default();
 
         let host_port_str = profile.host.port.to_string();
         let join_port_str = profile.join.port.to_string();
-        let last_ticket = match profile.join.last_ticket.clone() {
-            Some(ticket) => ticket,
-            None => String::new(),
-        };
+        let last_ticket: String = profile.join.last_ticket.clone().unwrap_or_default();
 
         let mut state = Self {
             show_help: false,

@@ -8,21 +8,28 @@ use crate::tunnel::SecretKey;
 
 const KEY_LEN: usize = 32;
 
-/// 从文件加载密钥；若文件不存在则生成新密钥并保存。
+/// 从文件加载密钥；若文件不存在则原子生成新密钥并保存。
+///
+/// 通过先加载、失败时原子创建的顺序避免 TOCTOU 竞态。
 pub fn load_or_generate_key(path: &Path) -> Result<SecretKey> {
-    if path.exists() {
-        load_key(path)
-    } else {
-        generate_new_key(path)
+    match load_key(path) {
+        Ok(key) => Ok(key),
+        Err(e) if is_not_found(&e) => generate_new_key(path),
+        Err(e) => Err(e),
     }
 }
 
 /// 强制重新生成新密钥并保存。
+///
+/// 使用原子创建（`create_new`）写入；若文件已被并发创建则 fallback 到加载。
 pub fn generate_new_key(path: &Path) -> Result<SecretKey> {
     let bytes: [u8; KEY_LEN] = rand::random();
     let key = SecretKey::from_bytes(&bytes);
-    save_key(path, &key)?;
-    Ok(key)
+    match save_key_exclusive(path, &key) {
+        Ok(()) => Ok(key),
+        Err(e) if is_already_exists(&e) => load_key(path),
+        Err(e) => Err(e),
+    }
 }
 
 fn load_key(path: &Path) -> Result<SecretKey> {
@@ -48,7 +55,8 @@ fn load_key(path: &Path) -> Result<SecretKey> {
     Ok(SecretKey::from_bytes(&arr))
 }
 
-fn save_key(path: &Path, key: &SecretKey) -> Result<()> {
+/// 原子创建并写入密钥文件（`create_new` 模式，文件已存在则失败）。
+fn save_key_exclusive(path: &Path, key: &SecretKey) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| PersistError::PathIo {
             op: "create key directory",
@@ -65,12 +73,11 @@ fn save_key(path: &Path, key: &SecretKey) -> Result<()> {
 
         let mut file = OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(0o600)
             .open(path)
             .map_err(|e| PersistError::PathIo {
-                op: "open key file",
+                op: "create key file",
                 path: path.to_path_buf(),
                 source: e,
             })?;
@@ -84,12 +91,43 @@ fn save_key(path: &Path, key: &SecretKey) -> Result<()> {
 
     #[cfg(not(unix))]
     {
-        std::fs::write(path, key.to_bytes()).map_err(|e| PersistError::PathIo {
-            op: "write key file",
-            path: path.to_path_buf(),
-            source: e,
-        })?;
+        use std::fs::OpenOptions;
+        use std::io::Write;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| PersistError::PathIo {
+                op: "create key file",
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+        file.write_all(&key.to_bytes())
+            .map_err(|e| PersistError::PathIo {
+                op: "write key file",
+                path: path.to_path_buf(),
+                source: e,
+            })?;
     }
 
     Ok(())
+}
+
+/// 检查错误链中是否包含 `io::ErrorKind::NotFound`。
+fn is_not_found(err: &crate::error::SculkError) -> bool {
+    matches!(
+        err,
+        crate::error::SculkError::Persist(PersistError::PathIo { source, .. })
+        if source.kind() == std::io::ErrorKind::NotFound
+    )
+}
+
+/// 检查错误链中是否包含 `io::ErrorKind::AlreadyExists`。
+fn is_already_exists(err: &crate::error::SculkError) -> bool {
+    matches!(
+        err,
+        crate::error::SculkError::Persist(PersistError::PathIo { source, .. })
+        if source.kind() == std::io::ErrorKind::AlreadyExists
+    )
 }

@@ -21,11 +21,20 @@ impl TerminalSession {
     /// 进入终端会话。
     ///
     /// Purpose: 启动 TUI 前初始化 raw mode 与 alternate screen。
-    /// Args: 无。
-    /// Returns: 成功时返回会话守卫。
-    /// Edge Cases: 任一步骤失败会返回错误，调用方可中止启动。
+    /// Edge Cases: raw mode 开启后若后续步骤失败，会先恢复 raw mode 再返回错误。
     pub fn enter() -> anyhow::Result<Self> {
         enable_raw_mode()?;
+        match Self::enter_inner() {
+            Ok(session) => Ok(session),
+            Err(e) => {
+                let _ = disable_raw_mode();
+                Err(e)
+            }
+        }
+    }
+
+    /// raw mode 已开启后的初始化步骤。
+    fn enter_inner() -> anyhow::Result<Self> {
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(stdout);

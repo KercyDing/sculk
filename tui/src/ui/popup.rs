@@ -4,6 +4,27 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
+
+/// 单个字符的显示列宽，控制字符视为 0。
+fn char_width(ch: char) -> usize {
+    unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+}
+
+/// 按显示宽度从 `s` 的指定字节偏移开始截取，返回 `(end_byte, 实际显示宽度)`。
+fn slice_by_width(s: &str, start: usize, max_width: usize) -> (usize, usize) {
+    let mut end = start;
+    let mut width = 0;
+    for (i, ch) in s[start..].char_indices() {
+        let w = char_width(ch);
+        if width + w > max_width {
+            break;
+        }
+        width += w;
+        end = start + i + ch.len_utf8();
+    }
+    (end, width)
+}
 
 use super::theme::{ACCENT, INFO, PANEL_ALT, WARN};
 use crate::state::{AppState, HelpLineSpec};
@@ -112,17 +133,19 @@ pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, sta
 
 /// 在给定区域内生成居中矩形。
 pub fn centered_rect(width_percent: u16, height_percent: u16, area: Rect) -> Rect {
+    let h = height_percent.min(100);
+    let w = width_percent.min(100);
     let vertical = Layout::vertical([
-        Constraint::Percentage((100 - height_percent) / 2),
-        Constraint::Percentage(height_percent),
-        Constraint::Percentage((100 - height_percent) / 2),
+        Constraint::Percentage((100 - h) / 2),
+        Constraint::Percentage(h),
+        Constraint::Percentage((100 - h) / 2),
     ])
     .split(area);
 
     Layout::horizontal([
-        Constraint::Percentage((100 - width_percent) / 2),
-        Constraint::Percentage(width_percent),
-        Constraint::Percentage((100 - width_percent) / 2),
+        Constraint::Percentage((100 - w) / 2),
+        Constraint::Percentage(w),
+        Constraint::Percentage((100 - w) / 2),
     ])
     .split(vertical[1])[1]
 }
@@ -188,31 +211,48 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         );
 
         let max_w = value_row.width as usize;
-        let chars: Vec<char> = field.value.chars().collect();
-        let char_count = chars.len();
 
         let (display, cursor_offset) = if field.active {
-            let cursor_char = field.value[..field.cursor].chars().count();
-            if char_count == 0 {
+            let before_cursor = &field.value[..field.cursor];
+            let cursor_width = UnicodeWidthStr::width(before_cursor);
+            let full_width = UnicodeWidthStr::width(field.value.as_str());
+            if full_width == 0 {
                 (" ".to_string(), 0usize)
+            } else if cursor_width >= max_w {
+                // 光标超出视口右侧——从视口起始偏移开始裁剪
+                let mut start_byte = 0;
+                let mut acc_width = 0;
+                let target = cursor_width.saturating_sub(max_w);
+                for (i, ch) in field.value.char_indices() {
+                    let w = char_width(ch);
+                    if acc_width + w > target + w {
+                        break;
+                    }
+                    acc_width += w;
+                    start_byte = i + ch.len_utf8();
+                }
+                let (end_byte, _) = slice_by_width(&field.value, start_byte, max_w);
+                let s = field.value[start_byte..end_byte].to_string();
+                let prefix_w = UnicodeWidthStr::width(&field.value[start_byte..field.cursor]);
+                (s, prefix_w)
             } else {
-                let start = if cursor_char >= max_w {
-                    cursor_char - max_w + 1
-                } else {
-                    0
-                };
-                let end = (start + max_w).min(char_count);
-                let s: String = chars[start..end].iter().collect();
-                (s, cursor_char - start)
+                // 光标在视口内，从头裁剪
+                let (end_byte, _) = slice_by_width(&field.value, 0, max_w);
+                let s = field.value[..end_byte].to_string();
+                (s, cursor_width)
             }
         } else if field.value.is_empty() {
             ("(空)".to_string(), 0)
-        } else if char_count <= max_w {
-            (field.value.clone(), 0)
         } else {
-            let mut s: String = chars[..max_w.saturating_sub(1)].iter().collect();
-            s.push('…');
-            (s, 0)
+            let full_width = UnicodeWidthStr::width(field.value.as_str());
+            if full_width <= max_w {
+                (field.value.clone(), 0)
+            } else {
+                let (end_byte, _) = slice_by_width(&field.value, 0, max_w.saturating_sub(1));
+                let mut s = field.value[..end_byte].to_string();
+                s.push('…');
+                (s, 0)
+            }
         };
 
         let value_style = if field.active {
@@ -228,7 +268,8 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         );
 
         if field.active {
-            frame.set_cursor_position((value_row.x + cursor_offset as u16, value_row.y));
+            let offset = u16::try_from(cursor_offset).unwrap_or(u16::MAX);
+            frame.set_cursor_position((value_row.x.saturating_add(offset), value_row.y));
         }
     }
 

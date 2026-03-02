@@ -318,10 +318,7 @@ pub(crate) fn tabs_spec(state: &AppState) -> TabsSpec {
             hint: "i 编辑 | ↑/↓ 切换字段",
         },
         ActiveTab::Relay => {
-            let selected_idx = match state.relay_state.selected() {
-                Some(idx) => idx,
-                None => 0,
-            };
+            let selected_idx = state.relay_state.selected().unwrap_or_default();
             let options = RELAYS
                 .iter()
                 .enumerate()

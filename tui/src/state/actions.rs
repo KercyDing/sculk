@@ -134,7 +134,10 @@ pub(crate) fn apply_relay(state: &mut AppState) {
     match selected {
         0 => {
             if selected == state.relay_idx {
-                state.add_log(&format!("中继保持不变: {}", RELAYS[state.relay_idx]));
+                state.add_log(&format!(
+                    "中继保持不变: {}",
+                    RELAYS.get(state.relay_idx).unwrap_or(&"未知")
+                ));
                 return;
             }
             state.ctx.profile.relay.custom = false;
@@ -162,14 +165,21 @@ pub(crate) fn apply_relay(state: &mut AppState) {
         }
         _ => {
             if selected == state.relay_idx {
-                state.add_log(&format!("中继保持不变: {}", RELAYS[state.relay_idx]));
+                state.add_log(&format!(
+                    "中继保持不变: {}",
+                    RELAYS.get(state.relay_idx).unwrap_or(&"未知")
+                ));
                 return;
             }
         }
     }
 
+    let selected = selected.min(RELAYS.len().saturating_sub(1));
     state.relay_idx = selected;
-    state.add_log(&format!("中继已切换到 {}", RELAYS[state.relay_idx]));
+    state.add_log(&format!(
+        "中继已切换到 {}",
+        RELAYS.get(state.relay_idx).unwrap_or(&"未知")
+    ));
 }
 
 /// 停止当前隧道。

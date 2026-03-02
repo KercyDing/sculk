@@ -58,6 +58,13 @@ pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
             state.add_log(&msg);
         }
         AppEvent::CloseFailed(msg) => {
+            state.phase = TunnelPhase::Idle;
+            state.quit_pressed_at = None;
+            state.active_mode = None;
+            state.ctx.tunnel = None;
+            state.ticket = None;
+            state.connections.clear();
+            state.ctx.event_forwarder = None;
             state.add_log(&msg);
         }
         AppEvent::Closed => {
@@ -98,7 +105,7 @@ pub(crate) fn handle_tunnel_event(state: &mut AppState, event: TunnelEvent) {
     state.add_log(&msg);
 }
 
-/// 定时刷新：递增 tick、清理退出提示、更新连接快照。
+/// 定时刷新：递增 tick、清理退出提示、更新连接快照、检测异常句柄。
 pub(crate) fn on_tick(state: &mut AppState) {
     state.tick = state.tick.saturating_add(1);
 
@@ -119,5 +126,17 @@ pub(crate) fn on_tick(state: &mut AppState) {
                 state.add_log(&format!("连接快照更新失败: {e}"));
             }
         }
+    }
+
+    // 检测 startup_handle 异常结束（panic / 无事件退出）
+    if state.phase == TunnelPhase::Starting
+        && let Some(ref handle) = state.ctx.startup_handle
+        && handle.is_finished()
+    {
+        tracing::warn!("startup handle finished without sending event, resetting to Idle");
+        state.ctx.startup_handle = None;
+        state.phase = TunnelPhase::Idle;
+        state.active_mode = None;
+        state.add_log("启动任务异常终止");
     }
 }

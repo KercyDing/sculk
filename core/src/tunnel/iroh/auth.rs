@@ -3,9 +3,13 @@
 //! 协议格式：join 侧发送 `[AUTH_VERSION, ...password_bytes]`，
 //! host 侧验证后回写单字节 `AUTH_OK` 或 `AUTH_REJECTED`。
 
+use subtle::ConstantTimeEq;
+
 use super::*;
 
 const AUTH_VERSION: u8 = 0x01;
+/// 认证数据读取的固定上限。
+const AUTH_READ_LIMIT: usize = 512;
 const AUTH_OK: u8 = 0x00;
 const AUTH_REJECTED: u8 = 0x01;
 
@@ -45,7 +49,7 @@ pub(super) async fn auth_verify(conn: &Connection, expected: &str) -> crate::Res
         .map_err(|e| crate::error::TunnelError::AcceptAuthStream(e.to_string()))?;
 
     let data = recv
-        .read_to_end(1 + expected.len() + 256)
+        .read_to_end(AUTH_READ_LIMIT)
         .await
         .map_err(|e| crate::error::TunnelError::ReadAuthPayload(e.to_string()))?;
 
@@ -69,7 +73,7 @@ pub(super) async fn auth_verify(conn: &Connection, expected: &str) -> crate::Res
     }
 
     let password = &data[1..];
-    let ok = password == expected.as_bytes();
+    let ok: bool = password.ct_eq(expected.as_bytes()).into();
 
     send.write_all(&[if ok { AUTH_OK } else { AUTH_REJECTED }])
         .await

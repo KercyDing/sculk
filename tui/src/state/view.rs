@@ -72,7 +72,7 @@ pub(crate) fn connection_label(state: &AppState) -> String {
 
 /// 当前中继标签。
 pub(crate) fn relay_label(state: &AppState) -> &str {
-    crate::state::RELAYS[state.relay_idx]
+    crate::state::RELAYS.get(state.relay_idx).unwrap_or(&"未知")
 }
 
 /// Esc 在当前生命周期对应动作文案。

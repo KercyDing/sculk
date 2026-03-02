@@ -61,7 +61,7 @@ pub(super) async fn reconnect_supervisor(
 
         let mut attempt: u32 = 0;
         let reconnected = loop {
-            attempt += 1;
+            attempt = attempt.saturating_add(1);
 
             if let Some(max) = ctx.config.max_retries
                 && attempt > max

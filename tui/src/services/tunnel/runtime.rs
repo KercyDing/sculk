@@ -76,15 +76,18 @@ pub fn spawn_join(
 }
 
 /// 异步关闭隧道。
+///
+/// 成功关闭发送 `Closed`，超时则发送 `CloseFailed`，不再混合发送避免状态错乱。
 pub fn spawn_close(tunnel: Arc<IrohTunnel>, tx: mpsc::UnboundedSender<AppEvent>) {
     tokio::spawn(async move {
         match tokio::time::timeout(Duration::from_secs(5), tunnel.close()).await {
-            Ok(()) => {}
+            Ok(()) => {
+                let _ = tx.send(AppEvent::Closed);
+            }
             Err(_) => {
                 let _ = tx.send(AppEvent::CloseFailed("关闭隧道超时 (5s)".to_string()));
             }
         }
-        let _ = tx.send(AppEvent::Closed);
     });
 }
 
