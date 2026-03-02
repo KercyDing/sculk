@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use sculk::tunnel::{IrohTunnel, Ticket, TunnelConfig, TunnelEvent};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 /// TUI 内部事件。
 pub enum AppEvent {
@@ -27,14 +28,14 @@ pub enum AppEvent {
     Closed,
 }
 
-/// 异步启动 host 隧道。
+/// 异步启动 host 隧道，返回 JoinHandle 供外部 abort。
 pub fn spawn_host(
     port: u16,
     secret_key: sculk::tunnel::SecretKey,
     relay_url: Option<sculk::tunnel::RelayUrl>,
     password: Option<String>,
     tx: mpsc::UnboundedSender<AppEvent>,
-) {
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let config = TunnelConfig {
             event_delay: Duration::ZERO,
@@ -53,49 +54,49 @@ pub fn spawn_host(
                 let _ = tx.send(AppEvent::StartFailed(format!("host 启动失败: {e}")));
             }
         }
-    });
+    })
 }
 
-/// 异步启动 join 隧道。
+/// 异步启动 join 隧道，返回 JoinHandle 供外部 abort。
+/// 票据解析失败时直接发送 StartFailed，返回已完成的 handle。
 pub fn spawn_join(
     ticket_str: &str,
     port: u16,
     password: Option<String>,
     tx: mpsc::UnboundedSender<AppEvent>,
-) {
-    let ticket_str = ticket_str.trim().trim_matches('"');
-    let ticket_result: Result<Ticket, _> = ticket_str.parse();
-    match ticket_result {
-        Ok(ticket) => {
-            tokio::spawn(async move {
-                let config = TunnelConfig {
-                    event_delay: Duration::ZERO,
-                    password,
-                    ..Default::default()
-                };
-                match IrohTunnel::join(&ticket, port, config).await {
-                    Ok((tunnel, events)) => {
-                        let _ = tx.send(AppEvent::JoinConnected {
-                            tunnel: Arc::new(tunnel),
-                            events,
-                        });
-                    }
-                    Err(e) => {
-                        let _ = tx.send(AppEvent::StartFailed(format!("join 失败: {e}")));
-                    }
-                }
-            });
+) -> JoinHandle<()> {
+    let ticket_str = ticket_str.trim().trim_matches('"').to_owned();
+    tokio::spawn(async move {
+        let ticket: Ticket = match ticket_str.parse() {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = tx.send(AppEvent::StartFailed(format!("票据解析失败: {e}")));
+                return;
+            }
+        };
+        let config = TunnelConfig {
+            event_delay: Duration::ZERO,
+            password,
+            ..Default::default()
+        };
+        match IrohTunnel::join(&ticket, port, config).await {
+            Ok((tunnel, events)) => {
+                let _ = tx.send(AppEvent::JoinConnected {
+                    tunnel: Arc::new(tunnel),
+                    events,
+                });
+            }
+            Err(e) => {
+                let _ = tx.send(AppEvent::StartFailed(format!("join 失败: {e}")));
+            }
         }
-        Err(e) => {
-            let _ = tx.send(AppEvent::StartFailed(format!("票据解析失败: {e}")));
-        }
-    }
+    })
 }
 
 /// 异步关闭隧道。
 pub fn spawn_close(tunnel: Arc<IrohTunnel>, tx: mpsc::UnboundedSender<AppEvent>) {
     tokio::spawn(async move {
-        tunnel.close().await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), tunnel.close()).await;
         let _ = tx.send(AppEvent::Closed);
     });
 }
@@ -104,12 +105,12 @@ pub fn spawn_close(tunnel: Arc<IrohTunnel>, tx: mpsc::UnboundedSender<AppEvent>)
 pub fn spawn_event_forwarder(
     mut events: mpsc::Receiver<TunnelEvent>,
     tx: mpsc::UnboundedSender<AppEvent>,
-) {
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(event) = events.recv().await {
             if tx.send(AppEvent::Tunnel(event)).is_err() {
                 break;
             }
         }
-    });
+    })
 }

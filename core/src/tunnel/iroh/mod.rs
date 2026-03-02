@@ -41,6 +41,8 @@ const FULL_RECHECK_DELAY: Duration = Duration::from_millis(1500);
 pub struct IrohTunnel {
     endpoint: Endpoint,
     conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    /// 关闭信号发送端。
+    shutdown: tokio::sync::watch::Sender<bool>,
 }
 
 impl IrohTunnel {
@@ -81,7 +83,17 @@ impl IrohTunnel {
             }
         });
 
-        Ok((Self { endpoint, conns }, ticket, rx))
+        // host 侧 accept loop 在 endpoint 关闭后自然退出，shutdown 信号仅占位
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        Ok((
+            Self {
+                endpoint,
+                conns,
+                shutdown,
+            },
+            ticket,
+            rx,
+        ))
     }
 
     /// 通过票据加入 host，返回事件接收端。
@@ -109,16 +121,26 @@ impl IrohTunnel {
         let ep = endpoint.clone();
         let conns_clone = conns.clone();
         let endpoint_id = ticket.endpoint_id;
+
+        let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
         tokio::spawn(async move {
             let ctx = JoinContext {
                 listener,
                 conns: conns_clone,
                 config,
+                shutdown: shutdown_rx,
             };
             reconnect_supervisor(ep, endpoint_id, conn, conn_info, tx, ctx).await;
         });
 
-        Ok((Self { endpoint, conns }, rx))
+        Ok((
+            Self {
+                endpoint,
+                conns,
+                shutdown,
+            },
+            rx,
+        ))
     }
 
     /// 返回当前活跃连接快照。
@@ -160,8 +182,9 @@ impl IrohTunnel {
         self.endpoint.id().to_string()
     }
 
-    /// 关闭隧道。
+    /// 关闭隧道。先通知后台任务退出，再关闭 endpoint。
     pub async fn close(&self) {
+        let _ = self.shutdown.send(true);
         self.endpoint.close().await;
     }
 }

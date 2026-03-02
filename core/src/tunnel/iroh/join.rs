@@ -11,6 +11,8 @@ pub(super) struct JoinContext {
     pub(super) listener: Arc<TcpListener>,
     pub(super) conns: Arc<Mutex<Vec<ConnectionInfo>>>,
     pub(super) config: TunnelConfig,
+    /// 关闭信号：为 true 或 sender 被丢弃时，supervisor 应立即退出。
+    pub(super) shutdown: tokio::sync::watch::Receiver<bool>,
 }
 
 /// Join 侧重连 supervisor。
@@ -20,26 +22,34 @@ pub(super) async fn reconnect_supervisor(
     mut conn: Connection,
     mut conn_info: ConnectionInfo,
     tx: mpsc::Sender<TunnelEvent>,
-    ctx: JoinContext,
+    mut ctx: JoinContext,
 ) {
     loop {
         let remote_id = conn.remote_id().fmt_short().to_string();
         spawn_path_monitor(conn.clone(), remote_id, tx.clone(), ctx.config.event_delay);
         let accept_handle = spawn_join_accept_loop(conn.clone(), ctx.listener.clone(), tx.clone());
 
-        let permanent_reject = if let Some((err, _stats)) = conn_info.closed().await {
-            let rejected = is_permanent_rejection(&err);
-            let _ = tx
-                .send(TunnelEvent::Disconnected {
-                    reason: err.to_string(),
-                })
-                .await;
-            rejected
-        } else {
-            false
+        // 等待连接关闭，或提前收到关闭信号
+        let permanent_reject = tokio::select! {
+            result = conn_info.closed() => {
+                accept_handle.abort();
+                if let Some((err, _stats)) = result {
+                    let rejected = is_permanent_rejection(&err);
+                    let _ = tx
+                        .send(TunnelEvent::Disconnected {
+                            reason: err.to_string(),
+                        })
+                        .await;
+                    rejected
+                } else {
+                    false
+                }
+            }
+            _ = wait_for_shutdown(&mut ctx.shutdown) => {
+                accept_handle.abort();
+                return;
+            }
         };
-
-        accept_handle.abort();
 
         if permanent_reject {
             return;
@@ -74,7 +84,16 @@ pub(super) async fn reconnect_supervisor(
             let _ = tx.send(TunnelEvent::Reconnecting { attempt }).await;
 
             tracing::info!(attempt, ?backoff, "reconnecting...");
-            tokio::time::sleep(backoff).await;
+
+            // backoff sleep 期间响应关闭信号
+            tokio::select! {
+                _ = tokio::time::sleep(backoff) => {}
+                _ = wait_for_shutdown(&mut ctx.shutdown) => return,
+            }
+
+            if *ctx.shutdown.borrow() {
+                return;
+            }
 
             match endpoint.connect(endpoint_id, ALPN).await {
                 Ok(new_conn) => {
@@ -105,6 +124,14 @@ pub(super) async fn reconnect_supervisor(
         let _ = tx.send(TunnelEvent::Reconnected).await;
         tracing::info!("reconnected successfully");
     }
+}
+
+/// value 变为 true 或 sender 被丢弃时返回（均视为关闭信号）。
+async fn wait_for_shutdown(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    if *rx.borrow() {
+        return;
+    }
+    let _ = rx.changed().await;
 }
 
 /// 启动 join accept loop。

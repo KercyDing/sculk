@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use super::theme::{ACCENT, INFO, PANEL_ALT};
+use super::theme::{ACCENT, INFO, PANEL_ALT, WARN};
 use crate::input::InputField;
 use crate::state::{ActiveTab, AppState, HostField, InputMode, JoinField};
 
@@ -84,6 +84,69 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         Line::raw("票据自动复制到剪贴板。"),
     ]));
     frame.render_widget(help, popup.inner(Margin::new(1, 1)));
+}
+
+/// 中止隧道确认弹窗。
+pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
+    if !state.confirm_stop {
+        return;
+    }
+
+    let popup = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(7),
+        Constraint::Fill(1),
+    ])
+    .split(area);
+
+    let popup = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(36),
+        Constraint::Fill(1),
+    ])
+    .split(popup[1])[1];
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" 中止隧道 ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().bg(PANEL_ALT))
+        .border_style(Style::default().fg(WARN));
+    frame.render_widget(block, popup);
+
+    let inner = popup.inner(Margin::new(2, 1));
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "确认停止当前隧道？",
+            Style::default().fg(Color::White),
+        )),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                "[Y]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" 停止    ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                "[N]",
+                Style::default().fg(INFO).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" 取消", Style::default().fg(Color::Gray)),
+        ])),
+        rows[2],
+    );
 }
 
 /// 在给定区域内生成居中矩形。

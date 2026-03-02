@@ -70,6 +70,7 @@ pub enum JoinField {
 /// TUI 应用的全量状态，持有隧道句柄、输入字段与持久化 Profile。
 pub struct AppState {
     pub show_help: bool,
+    pub confirm_stop: bool,
     pub tick: u64,
     pub tab: ActiveTab,
     pub focus: FocusPane,
@@ -84,6 +85,8 @@ pub struct AppState {
     pub phase: TunnelPhase,
     pub active_mode: Option<ActiveTab>,
     tunnel: Option<Arc<IrohTunnel>>,
+    event_forwarder: Option<tokio::task::JoinHandle<()>>,
+    startup_handle: Option<tokio::task::JoinHandle<()>>,
     pub ticket: Option<String>,
     pub app_tx: mpsc::UnboundedSender<AppEvent>,
 
@@ -125,6 +128,7 @@ impl AppState {
 
         let mut state = Self {
             show_help: false,
+            confirm_stop: false,
             tick: 0,
             tab: ActiveTab::Host,
             focus: FocusPane::Profile,
@@ -138,6 +142,8 @@ impl AppState {
             phase: TunnelPhase::Idle,
             active_mode: None,
             tunnel: None,
+            event_forwarder: None,
+            startup_handle: None,
             ticket: None,
             app_tx,
 
@@ -164,12 +170,26 @@ impl AppState {
         state
     }
 
-    /// 键盘处理。
     /// 处理键盘事件，返回 [`Step::Exit`] 时退出事件循环。
     pub fn handle_key(&mut self, key: KeyEvent) -> Step {
         if self.input_mode == InputMode::Editing {
             self.quit_pressed_at = None;
             return self.handle_editing_key(key);
+        }
+
+        // 中止确认弹窗优先处理
+        if self.confirm_stop {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.confirm_stop = false;
+                    self.stop_tunnel();
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    self.confirm_stop = false;
+                }
+                _ => {}
+            }
+            return Step::Continue;
         }
 
         if self.show_help {
@@ -181,6 +201,23 @@ impl AppState {
         }
 
         if key.code == KeyCode::Esc {
+            // 启动中：直接中止，无需确认
+            if self.phase == TunnelPhase::Starting {
+                if let Some(handle) = self.startup_handle.take() {
+                    handle.abort();
+                }
+                self.phase = TunnelPhase::Idle;
+                self.active_mode = None;
+                self.add_log("已取消启动");
+                return Step::Continue;
+            }
+
+            // 隧道运行中：Esc 弹出中止确认，而非计入退出计数
+            if self.phase == TunnelPhase::Active {
+                self.confirm_stop = true;
+                return Step::Continue;
+            }
+
             let now = Instant::now();
             if let Some(prev) = self.quit_pressed_at
                 && now.duration_since(prev).as_secs() < 3
@@ -349,7 +386,13 @@ impl AppState {
                 self.phase = TunnelPhase::Starting;
                 self.active_mode = Some(ActiveTab::Host);
                 self.add_log(&format!("正在启动 host 隧道 (端口 {port})..."));
-                tunnel::spawn_host(port, secret_key, relay_url, password, self.app_tx.clone());
+                self.startup_handle = Some(tunnel::spawn_host(
+                    port,
+                    secret_key,
+                    relay_url,
+                    password,
+                    self.app_tx.clone(),
+                ));
             }
             TunnelPhase::Active if self.active_mode == Some(ActiveTab::Host) => {
                 self.stop_tunnel();
@@ -383,7 +426,12 @@ impl AppState {
                 self.phase = TunnelPhase::Starting;
                 self.active_mode = Some(ActiveTab::Join);
                 self.add_log("正在连接...");
-                tunnel::spawn_join(&self.join_ticket.value, port, password, self.app_tx.clone());
+                self.startup_handle = Some(tunnel::spawn_join(
+                    &self.join_ticket.value,
+                    port,
+                    password,
+                    self.app_tx.clone(),
+                ));
             }
             TunnelPhase::Active if self.active_mode == Some(ActiveTab::Join) => {
                 self.stop_tunnel();
@@ -443,6 +491,9 @@ impl AppState {
     }
 
     fn stop_tunnel(&mut self) {
+        if let Some(handle) = self.event_forwarder.take() {
+            handle.abort();
+        }
         if let Some(t) = self.tunnel.take() {
             self.phase = TunnelPhase::Stopping;
             self.add_log("正在关闭隧道...");
@@ -460,6 +511,7 @@ impl AppState {
                 ticket,
                 events,
             } => {
+                self.startup_handle = None;
                 self.phase = TunnelPhase::Active;
                 self.tunnel = Some(tunnel);
 
@@ -471,20 +523,24 @@ impl AppState {
 
                 self.add_log("host 隧道已启动");
 
-                tunnel::spawn_event_forwarder(events, self.app_tx.clone());
+                self.event_forwarder =
+                    Some(tunnel::spawn_event_forwarder(events, self.app_tx.clone()));
             }
             AppEvent::JoinConnected { tunnel, events } => {
+                self.startup_handle = None;
                 self.phase = TunnelPhase::Active;
                 self.tunnel = Some(tunnel);
                 self.add_log("已成功连入隧道");
 
-                // 持久化本次使用的票据，下次打开直接回填
+                // 持久化本次使用的票据
                 self.profile.join.last_ticket = Some(self.join_ticket.value.clone());
                 let _ = self.profile.save();
 
-                tunnel::spawn_event_forwarder(events, self.app_tx.clone());
+                self.event_forwarder =
+                    Some(tunnel::spawn_event_forwarder(events, self.app_tx.clone()));
             }
             AppEvent::StartFailed(msg) => {
+                self.startup_handle = None;
                 self.phase = TunnelPhase::Idle;
                 self.active_mode = None;
                 self.add_log(&msg);
@@ -495,6 +551,7 @@ impl AppState {
                 self.tunnel = None;
                 self.ticket = None;
                 self.connections.clear();
+                self.event_forwarder = None;
                 self.add_log("隧道已关闭");
             }
             AppEvent::Tunnel(te) => self.handle_tunnel_event(te),
