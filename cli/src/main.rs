@@ -1,9 +1,9 @@
-//! sculk 命令行工具（CLI）。
+//! sckc 命令行工具（CLI）。
 //!
 //! 用法：
-//! - `sculk host`：创建房间并生成连接票据（ticket）
-//! - `sculk join "<ticket>"`：通过票据加入房间（注意给 ticket 加引号）
-//! - `sculk relay`：管理自定义 relay 配置
+//! - `sckc host`：创建房间并生成连接票据（ticket）
+//! - `sckc join "<ticket>"`：通过票据加入房间（注意给 ticket 加引号）
+//! - `sckc relay`：管理自定义 relay 配置
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,7 +24,7 @@ const CLAP_STYLES: clap::builder::styling::Styles = clap::builder::styling::Styl
 
 #[derive(Parser)]
 #[command(
-    name = "sculk",
+    name = "sckc",
     version,
     about = "Minecraft 多人联机 P2P 隧道",
     arg_required_else_help = true,

@@ -25,5 +25,5 @@ ratatui = "0.30"
 unicode-width = "0.2"
 
 [[bin]]
-name = "sculk-tui"
+name = "sckt"
 path = "src/main.rs"

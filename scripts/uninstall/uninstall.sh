@@ -5,8 +5,8 @@ set -e
 
 if [ -t 0 ]; then
     echo "请选择要卸载的组件："
-    echo "  1) sculk"
-    echo "  2) sculk-tui"
+    echo "  1) sckc(sculk-cli)"
+    echo "  2) sckt(sculk-tui)"
     echo "  3) 全部 (默认)"
     printf "输入选项 [1/2/3]: "
     read choice
@@ -51,7 +51,7 @@ remove_binary() {
     done
     cargo_path="$HOME/.cargo/bin/$name"
     if [ -f "$cargo_path" ]; then
-        echo "检测到 $cargo_path，由 cargo install 安装，请手动执行：cargo uninstall $([ "$name" = "sculk" ] && echo sculk-cli || echo sculk-tui)"
+        echo "检测到 $cargo_path，由 cargo install 安装，请手动执行：cargo uninstall $([ "$name" = "sckc" ] && echo sculk-cli || echo sculk-tui)"
         found=1
     fi
     if [ "$found" -eq 0 ]; then
@@ -61,10 +61,10 @@ remove_binary() {
 
 echo "正在卸载所选组件..."
 if [ "$uninstall_sculk" -eq 1 ]; then
-    remove_binary "sculk"
+    remove_binary "sckc"
 fi
 if [ "$uninstall_tui" -eq 1 ]; then
-    remove_binary "sculk-tui"
+    remove_binary "sckt"
 fi
 
 echo ""

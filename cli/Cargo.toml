@@ -22,5 +22,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [[bin]]
-name = "sculk"
+name = "sckc"
 path = "src/main.rs"

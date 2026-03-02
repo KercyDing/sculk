@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "请选择要卸载的组件：" -ForegroundColor Cyan
-Write-Host "  1) sculk"
-Write-Host "  2) sculk-tui"
+Write-Host "  1) sckc(sculk-cli)"
+Write-Host "  2) sckt(sculk-tui)"
 Write-Host "  3) 全部 (默认)"
 $choice = Read-Host "输入选项 [1/2/3]"
 if ([string]::IsNullOrWhiteSpace($choice)) {
@@ -10,9 +10,9 @@ if ([string]::IsNullOrWhiteSpace($choice)) {
 }
 
 $components = switch ($choice) {
-    "1" { @("sculk") }
-    "2" { @("sculk-tui") }
-    "3" { @("sculk", "sculk-tui") }
+    "1" { @("sckc") }
+    "2" { @("sckt") }
+    "3" { @("sckc", "sckt") }
     default {
         Write-Host "错误：无效选项 '$choice'" -ForegroundColor Red
         exit 1
@@ -33,7 +33,7 @@ foreach ($component in $components) {
     }
     $cargoPath = Join-Path "$env:USERPROFILE\.cargo\bin" "$component.exe"
     if (Test-Path $cargoPath) {
-        $pkgName = if ($component -eq "sculk") { "sculk-cli" } else { "sculk-tui" }
+        $pkgName = if ($component -eq "sckc") { "sculk-cli" } else { "sculk-tui" }
         Write-Host "检测到 $cargoPath，由 cargo install 安装，请手动执行：cargo uninstall $pkgName" -ForegroundColor Yellow
     }
 }

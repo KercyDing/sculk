@@ -5,8 +5,8 @@
 [![license](https://img.shields.io/crates/l/sculk.svg)](LICENSE)
 
 一个面向 Minecraft 联机的 P2P 隧道项目，基于 iroh/QUIC，提供：
-- `sculk`：命令行客户端（CLI）
-- `sculk-tui`：终端图形客户端（TUI）
+- `sckc`：命令行客户端（CLI）
+- `sckt`：终端图形客户端（TUI）
 - `sculk`：可复用隧道核心库
 
 > Sculk（幽匿）是 Minecraft 深暗之域中悄然蔓延的脉络，无声地在节点间传递信号。
@@ -21,9 +21,9 @@
   - `IrohTunnel::host/join`
   - `Ticket`（`sculk://...`）
   - `TunnelConfig` / `TunnelEvent`
-- `cli` (`sculk-cli`)：`sculk` 命令行入口
+- `cli` (`sculk-cli`)：`sckc` 命令行入口
   - 建房、加入、中继配置管理
-- `tui` (`sculk-tui`)：`ratatui + crossterm` 终端界面
+- `tui` (`sculk-tui`)：`sckt`（`ratatui + crossterm`）终端界面
   - 建房/加入/中继三面板 + 日志 + 状态栏
 
 ## 工作原理
@@ -34,8 +34,8 @@
 
 连接流程：
 
-1. 房主启动 `sculk host`，读取/生成密钥，生成 `sculk://...` 票据并分享
-2. 玩家通过 `sculk join "sculk://..."` 连接，经密码校验和人数校验后建立 QUIC 隧道
+1. 房主启动 `sckc host`，读取/生成密钥，生成 `sculk://...` 票据并分享
+2. 玩家通过 `sckc join "sculk://..."` 连接，经密码校验和人数校验后建立 QUIC 隧道
 3. 隧道在两端之间双向转发 TCP 流量：玩家 MC 客户端 → 本地端口 → QUIC → 房主 MC 服务端
 4. 运行时通过 `TunnelEvent` 推送状态变化（玩家加入/离开、路径切换、重连等）
 
@@ -56,8 +56,8 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scrip
 ```
 
 脚本会交互式询问安装：
-1. `sculk`
-2. `sculk-tui`
+1. `sckc`
+2. `sckt`
 3. 全部
 
 ### 方式二：从 crates.io 安装
@@ -100,14 +100,14 @@ cargo uninstall sculk-cli
 cargo uninstall sculk-tui
 ```
 
-> 二进制名是 `sculk`，但 Cargo 包名是 `sculk-cli`。
+> 二进制名是 `sckc`（CLI）/ `sckt`（TUI），Cargo 包名仍是 `sculk-cli` / `sculk-tui`。
 
 ## CLI 使用
 
 ### 建房
 
 ```sh
-sculk host
+sckc host
 ```
 
 常用参数：
@@ -121,7 +121,7 @@ sculk host
 ### 加入
 
 ```sh
-sculk join "sculk://..."
+sckc join "sculk://..."
 ```
 
 常用参数：
@@ -132,9 +132,9 @@ sculk join "sculk://..."
 ### 中继配置
 
 ```sh
-sculk relay --list
-sculk relay --url https://your-relay.example.com
-sculk relay --reset
+sckc relay --list
+sckc relay --url https://your-relay.example.com
+sckc relay --reset
 ```
 
 - relay 优先级：命令行 `--relay` > 配置文件 > 默认 n0 relay。
@@ -143,7 +143,7 @@ sculk relay --reset
 ## TUI 使用
 
 ```sh
-sculk-tui
+sckt
 ```
 
 默认三模式：`建房 / 加入 / 中继`
@@ -217,8 +217,8 @@ just fmt            # 格式化
 just doc            # 生成文档
 just relay-build    # 交叉编译 iroh-relay
 
-just install        # 安装 sculk
-just install-tui    # 安装 sculk-tui
+just install        # 安装 sckc
+just install-tui    # 安装 sckt
 just install-all    # 安装全部
 just uninstall      # 卸载 sculk-cli
 just uninstall-tui  # 卸载 sculk-tui
@@ -227,12 +227,12 @@ just uninstall-all  # 卸载全部
 
 ## 发布产物
 
-Release 会同时构建两个客户端（`sculk` + `sculk-tui`）：
+Release 会同时构建两个客户端（`sckc` + `sckt`）：
 
-- Linux amd64：`sculk-linux-amd64` / `sculk-tui-linux-amd64`
-- macOS amd64：`sculk-darwin-amd64` / `sculk-tui-darwin-amd64`
-- macOS arm64：`sculk-darwin-arm64` / `sculk-tui-darwin-arm64`
-- Windows amd64：`sculk-windows-amd64.exe` / `sculk-tui-windows-amd64.exe`
+- Linux amd64：`sckc-linux-amd64` / `sckt-linux-amd64`
+- macOS amd64：`sckc-darwin-amd64` / `sckt-darwin-amd64`
+- macOS arm64：`sckc-darwin-arm64` / `sckt-darwin-arm64`
+- Windows amd64：`sckc-windows-amd64.exe` / `sckt-windows-amd64.exe`
 
 ## 自建 Relay
 

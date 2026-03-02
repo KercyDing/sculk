@@ -11,7 +11,7 @@ cargo install sculk-tui
 ## Usage
 
 ```sh
-sculk-tui
+sckt
 ```
 
 Three modes: `Host / Join / Relay`
@@ -45,7 +45,7 @@ cargo install sculk-tui
 ### 使用
 
 ```sh
-sculk-tui
+sckt
 ```
 
 三个模式：`建房 / 加入 / 中继`

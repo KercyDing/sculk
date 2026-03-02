@@ -52,14 +52,14 @@ jobs:
       - name: Rename artifacts (unix)
         if: runner.os != 'Windows'
         run: |
-          mv target/${{ matrix.target }}/release/sculk sculk-${{ matrix.suffix }}
-          mv target/${{ matrix.target }}/release/sculk-tui sculk-tui-${{ matrix.suffix }}
+          mv target/${{ matrix.target }}/release/sckc sckc-${{ matrix.suffix }}
+          mv target/${{ matrix.target }}/release/sckt sckt-${{ matrix.suffix }}
 
       - name: Rename artifacts (windows)
         if: runner.os == 'Windows'
         run: |
-          mv target/${{ matrix.target }}/release/sculk.exe sculk-${{ matrix.suffix }}.exe
-          mv target/${{ matrix.target }}/release/sculk-tui.exe sculk-tui-${{ matrix.suffix }}.exe
+          mv target/${{ matrix.target }}/release/sckc.exe sckc-${{ matrix.suffix }}.exe
+          mv target/${{ matrix.target }}/release/sckt.exe sckt-${{ matrix.suffix }}.exe
 
       - name: Upload artifacts (unix)
         if: runner.os != 'Windows'
@@ -67,8 +67,8 @@ jobs:
         with:
           name: ${{ matrix.target }}-bins
           path: |
-            sculk-${{ matrix.suffix }}
-            sculk-tui-${{ matrix.suffix }}
+            sckc-${{ matrix.suffix }}
+            sckt-${{ matrix.suffix }}
 
       - name: Upload artifacts (windows)
         if: runner.os == 'Windows'
@@ -76,8 +76,8 @@ jobs:
         with:
           name: ${{ matrix.target }}-bins
           path: |
-            sculk-${{ matrix.suffix }}.exe
-            sculk-tui-${{ matrix.suffix }}.exe
+            sckc-${{ matrix.suffix }}.exe
+            sckt-${{ matrix.suffix }}.exe
 
   release:
     needs: build
@@ -89,5 +89,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: sculk-*
+          files: |
+            sckc-*
+            sckt-*
           generate_release_notes: true

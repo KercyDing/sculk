@@ -4,11 +4,11 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 default:
     @just --list
 
-# 安装到 sculk 到 ~/.cargo/bin
+# 安装到 sckc 到 ~/.cargo/bin
 install:
     cargo install --path cli
 
-# 安装 sculk-tui 到 ~/.cargo/bin
+# 安装 sckt 到 ~/.cargo/bin
 install-tui:
     cargo install --path tui
 

@@ -13,8 +13,8 @@ if ($executionPolicy -eq "Restricted" -or $executionPolicy -eq "Undefined") {
 $ErrorActionPreference = "Stop"
 
 Write-Host "请选择要安装的组件：" -ForegroundColor Cyan
-Write-Host "  1) sculk"
-Write-Host "  2) sculk-tui"
+Write-Host "  1) sckc(sculk-cli)"
+Write-Host "  2) sckt(sculk-tui)"
 Write-Host "  3) 全部 (默认)"
 $choice = Read-Host "输入选项 [1/2/3]"
 if ([string]::IsNullOrWhiteSpace($choice)) {
@@ -22,9 +22,9 @@ if ([string]::IsNullOrWhiteSpace($choice)) {
 }
 
 $components = switch ($choice) {
-    "1" { @("sculk") }
-    "2" { @("sculk-tui") }
-    "3" { @("sculk", "sculk-tui") }
+    "1" { @("sckc") }
+    "2" { @("sckt") }
+    "3" { @("sckc", "sckt") }
     default {
         Write-Host "错误：无效选项 '$choice'" -ForegroundColor Red
         exit 1
@@ -39,7 +39,7 @@ $installed = 0
 foreach ($component in $components) {
     $cargoPath = Join-Path "$env:USERPROFILE\.cargo\bin" "$component.exe"
     if (Test-Path $cargoPath) {
-        $pkgName = if ($component -eq "sculk") { "sculk-cli" } else { "sculk-tui" }
+        $pkgName = if ($component -eq "sckc") { "sculk-cli" } else { "sculk-tui" }
         Write-Host "警告：检测到 $cargoPath，建议先执行 cargo uninstall $pkgName 避免冲突。" -ForegroundColor Yellow
         $answer = Read-Host "是否继续安装？[y/N]"
         if ($answer -notmatch '^[yY]') {
@@ -53,10 +53,10 @@ foreach ($component in $components) {
         }
     }
 
-    $artifact = if ($component -eq "sculk") {
-        "sculk-windows-amd64.exe"
+    $artifact = if ($component -eq "sckc") {
+        "sckc-windows-amd64.exe"
     } else {
-        "sculk-tui-windows-amd64.exe"
+        "sckt-windows-amd64.exe"
     }
     $downloadUrl = "https://github.com/KercyDing/sculk/releases/latest/download/$artifact"
     $installPath = Join-Path $INSTALL_DIR "$component.exe"
@@ -89,15 +89,15 @@ if ($userPath -notlike "*$INSTALL_DIR*") {
 
 Write-Host ""
 foreach ($component in $components) {
-    if ($component -eq "sculk-tui") {
+    if ($component -eq "sckt") {
         $exePath = Join-Path $INSTALL_DIR "$component.exe"
         if (Test-Path $exePath) {
-            Write-Host "验证 ($component): 已安装到 $exePath" -ForegroundColor Green
+            Write-Host "验证 (sckt/sculk-tui): 已安装到 $exePath" -ForegroundColor Green
         }
     } else {
         try {
             $version = & $component --version
-            Write-Host "验证 ($component): $version" -ForegroundColor Green
+            Write-Host "验证 (sckc/sculk-cli): $version" -ForegroundColor Green
         } catch {
             Write-Host "$component 已安装，请重启终端后使用。" -ForegroundColor Cyan
         }

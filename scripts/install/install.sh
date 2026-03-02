@@ -40,8 +40,8 @@ fi
 
 if [ -t 0 ]; then
     echo "请选择要安装的组件："
-    echo "  1) sculk"
-    echo "  2) sculk-tui"
+    echo "  1) sckc(sculk-cli)"
+    echo "  2) sckt(sculk-tui)"
     echo "  3) 全部 (默认)"
     printf "输入选项 [1/2/3]: "
     read choice
@@ -70,13 +70,13 @@ case "$choice" in
 esac
 
 if [ "$install_sculk" -eq 1 ]; then
-    install_list="sculk"
+    install_list="sckc"
 fi
 if [ "$install_tui" -eq 1 ]; then
     if [ -n "$install_list" ]; then
-        install_list="$install_list sculk-tui"
+        install_list="$install_list sckt"
     else
-        install_list="sculk-tui"
+        install_list="sckt"
     fi
 fi
 
@@ -107,7 +107,7 @@ echo "正在安装组件：$install_list"
 check_cargo_conflict() {
     cargo_path="$HOME/.cargo/bin/$1"
     if [ -f "$cargo_path" ]; then
-        pkg_name=$([ "$1" = "sculk" ] && echo "sculk-cli" || echo "sculk-tui")
+        pkg_name=$([ "$1" = "sckc" ] && echo "sculk-cli" || echo "sculk-tui")
         echo "警告：检测到 $cargo_path，建议先执行 cargo uninstall $pkg_name 避免冲突。"
         printf "是否继续安装？[y/N] "
         read answer
@@ -128,14 +128,14 @@ check_cargo_conflict() {
 installed=0
 
 if [ "$install_sculk" -eq 1 ]; then
-    if check_cargo_conflict "sculk"; then
-        download_binary "sculk-$SUFFIX" "sculk"
+    if check_cargo_conflict "sckc"; then
+        download_binary "sckc-$SUFFIX" "sckc"
         installed=1
     fi
 fi
 if [ "$install_tui" -eq 1 ]; then
-    if check_cargo_conflict "sculk-tui"; then
-        download_binary "sculk-tui-$SUFFIX" "sculk-tui"
+    if check_cargo_conflict "sckt"; then
+        download_binary "sckt-$SUFFIX" "sckt"
         installed=1
     fi
 fi
@@ -175,13 +175,13 @@ esac
 
 echo ""
 if [ "$install_sculk" -eq 1 ]; then
-    if command -v sculk >/dev/null 2>&1; then
-        echo "验证 (sculk): $(sculk --version)"
+    if command -v sckc >/dev/null 2>&1; then
+        echo "验证 (sckc/sculk-cli): $(sckc --version)"
     fi
 fi
 if [ "$install_tui" -eq 1 ]; then
-    if command -v sculk-tui >/dev/null 2>&1; then
-        echo "验证 (sculk-tui): 已安装到 $(command -v sculk-tui)"
+    if command -v sckt >/dev/null 2>&1; then
+        echo "验证 (sckt/sculk-tui): 已安装到 $(command -v sckt)"
     fi
 fi
 
