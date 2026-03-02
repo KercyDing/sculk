@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 
 use super::events::AppEvent;
 
-/// 异步启动 host 隧道，返回 `JoinHandle` 供外部 abort。
+/// 异步启动 host 隧道。
 pub fn spawn_host(
     port: u16,
     secret_key: sculk::tunnel::SecretKey,
@@ -38,7 +38,7 @@ pub fn spawn_host(
     })
 }
 
-/// 异步启动 join 隧道，返回 `JoinHandle` 供外部 abort。
+/// 异步启动 join 隧道。
 ///
 /// 票据解析失败时直接发送 `StartFailed`，返回已完成的 handle。
 pub fn spawn_join(
@@ -78,7 +78,12 @@ pub fn spawn_join(
 /// 异步关闭隧道。
 pub fn spawn_close(tunnel: Arc<IrohTunnel>, tx: mpsc::UnboundedSender<AppEvent>) {
     tokio::spawn(async move {
-        let _ = tokio::time::timeout(Duration::from_secs(5), tunnel.close()).await;
+        match tokio::time::timeout(Duration::from_secs(5), tunnel.close()).await {
+            Ok(()) => {}
+            Err(_) => {
+                let _ = tx.send(AppEvent::CloseFailed("关闭隧道超时 (5s)".to_string()));
+            }
+        }
         let _ = tx.send(AppEvent::Closed);
     });
 }

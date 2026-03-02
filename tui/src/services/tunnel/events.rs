@@ -22,6 +22,8 @@ pub enum AppEvent {
     },
     /// 启动失败。
     StartFailed(String),
+    /// 关闭失败。
+    CloseFailed(String),
     /// 关闭完成。
     Closed,
 }

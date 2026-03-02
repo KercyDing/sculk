@@ -4,13 +4,14 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Borders, Gauge, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use super::theme::{ACCENT, PANEL, border_style};
 use crate::state::AppState;
 
 pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(8)]).split(area);
-    let base_spec = state.logs_spec(0);
+    let base_spec = state.logs_spec(0, 0);
     let gauge = Gauge::default()
         .block(
             Block::default()
@@ -34,7 +35,8 @@ pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppS
     let inner = block.inner(sections[1]);
     frame.render_widget(block, sections[1]);
 
-    let spec = state.logs_spec(inner.height as usize);
+    let message_width = (inner.width as usize).saturating_sub(log_row_prefix_width());
+    let spec = state.logs_spec(inner.height as usize, message_width);
     for (vi, row_spec) in spec.rows.iter().enumerate() {
         let is_selected = row_spec.selected;
         let marker = if is_selected { "▶ " } else { "  " };
@@ -57,4 +59,11 @@ pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppS
             row,
         );
     }
+}
+
+fn log_row_prefix_width() -> usize {
+    let selected_prefix = format!("▶ [{:03}] ", 1);
+    let normal_prefix = format!("  [{:03}] ", 1);
+    UnicodeWidthStr::width(selected_prefix.as_str())
+        .max(UnicodeWidthStr::width(normal_prefix.as_str()))
 }

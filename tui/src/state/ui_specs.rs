@@ -3,6 +3,7 @@
 use crate::state::{
     ActiveTab, AppState, FocusPane, HostField, InputMode, JoinField, RELAYS, TAB_TITLES,
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// 头部栏规格。
 #[derive(Debug, Clone)]
@@ -143,10 +144,10 @@ pub(crate) fn header_spec(state: &AppState) -> HeaderSpec {
 /// 构建 Logs 规格。
 ///
 /// Purpose: 将日志滚动与选中逻辑从 UI 组件中剥离。
-/// Args: `state` 为应用状态；`visible_height` 为日志可见行数。
+/// Args: `state` 为应用状态；`visible_height` 为日志可见行数；`message_width` 为日志正文宽度。
 /// Returns: Gauge 与日志行渲染所需数据。
 /// Edge Cases: `visible_height=0` 时返回空日志行，避免越界。
-pub(crate) fn logs_spec(state: &AppState, visible_height: usize) -> LogsSpec {
+pub(crate) fn logs_spec(state: &AppState, visible_height: usize, message_width: usize) -> LogsSpec {
     let gauge = GaugeSpec {
         strength: state.route_strength(),
         label: state.gauge_label(),
@@ -171,7 +172,12 @@ pub(crate) fn logs_spec(state: &AppState, visible_height: usize) -> LogsSpec {
         }
         rows.push(LogRowSpec {
             index: idx,
-            text: state.logs[idx].clone(),
+            text: render_log_text(
+                &state.logs[idx],
+                message_width,
+                selected == Some(idx),
+                state.tick,
+            ),
             selected: selected == Some(idx),
         });
     }
@@ -181,6 +187,90 @@ pub(crate) fn logs_spec(state: &AppState, visible_height: usize) -> LogsSpec {
         focus_logs: state.focus == FocusPane::Logs,
         rows,
     }
+}
+
+fn render_log_text(text: &str, width: usize, selected: bool, tick: u64) -> String {
+    if width == 0 || text.is_empty() {
+        return String::new();
+    }
+
+    let text_width = UnicodeWidthStr::width(text);
+    if text_width <= width {
+        return text.to_string();
+    }
+
+    if !selected {
+        if width <= 3 {
+            return ".".repeat(width);
+        }
+        let mut compact = take_display_width_prefix(text, width - 3);
+        compact.push_str("...");
+        return compact;
+    }
+
+    let wrapped = format!("{text}   ");
+    let chars: Vec<char> = wrapped.chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+
+    let start = (tick as usize) % chars.len();
+    take_display_width_window(&chars, start, width)
+}
+
+fn take_display_width_prefix(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let Some(w) = UnicodeWidthChar::width(ch) else {
+            continue;
+        };
+        if w > 0 && used + w > max_width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+        if used >= max_width {
+            break;
+        }
+    }
+    out
+}
+
+fn take_display_width_window(chars: &[char], start: usize, width: usize) -> String {
+    if chars.is_empty() || width == 0 {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut used = 0usize;
+    let mut steps = 0usize;
+    let step_limit = chars.len().saturating_mul(2).max(width);
+    while used < width && steps < step_limit {
+        let ch = chars[(start + steps) % chars.len()];
+        steps += 1;
+        let Some(w) = UnicodeWidthChar::width(ch) else {
+            continue;
+        };
+        if w == 0 {
+            out.push(ch);
+            continue;
+        }
+        if used + w > width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    while used < width {
+        out.push(' ');
+        used += 1;
+    }
+    out
 }
 
 /// 构建 Tabs 规格。

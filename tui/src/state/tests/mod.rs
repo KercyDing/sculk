@@ -273,3 +273,69 @@ fn footer_spec_follows_state() {
             .any(|item| item.key == "编辑模式" && item.tone == FooterTone::Info)
     );
 }
+
+#[test]
+fn logs_spec_ellipsis_for_unselected_row() {
+    let mut state = test_state();
+    state.logs.clear();
+    state.log_state.select(None);
+    state.add_log("0123456789");
+    state.add_log("tail");
+    state.log_state.select(Some(1));
+
+    let spec = state.logs_spec(2, 5);
+    assert_eq!(spec.rows.len(), 2);
+    assert_eq!(spec.rows[0].text, "01...");
+    assert_eq!(spec.rows[1].text, "tail");
+}
+
+#[test]
+fn logs_spec_marquee_for_selected_row() {
+    let mut state = test_state();
+    state.logs.clear();
+    state.log_state.select(None);
+    state.add_log("abcdefghi");
+    state.log_state.select(Some(0));
+
+    state.tick = 0;
+    let text0 = state.logs_spec(1, 6).rows[0].text.clone();
+    state.tick = 1;
+    let text1 = state.logs_spec(1, 6).rows[0].text.clone();
+
+    assert_eq!(text0, "abcdef");
+    assert_eq!(text1, "bcdefg");
+}
+
+#[test]
+fn handle_app_event_close_failed_logs_error() {
+    use crate::services::tunnel::AppEvent;
+
+    let mut state = test_state();
+    state.handle_app_event(AppEvent::CloseFailed("close failed".into()));
+    assert!(
+        state
+            .logs
+            .last()
+            .is_some_and(|msg| msg.contains("close failed"))
+    );
+}
+
+#[test]
+fn logs_spec_uses_display_width_for_cjk_ellipsis_and_marquee() {
+    let mut state = test_state();
+    state.logs.clear();
+    state.log_state.select(None);
+    state.add_log("正在启动 host");
+    state.add_log("tail");
+
+    state.log_state.select(Some(1));
+    let unselected = state.logs_spec(2, 11).rows[0].text.clone();
+    assert_eq!(unselected, "正在启动...");
+
+    state.log_state.select(Some(0));
+    state.tick = 0;
+    let text0 = state.logs_spec(1, 11).rows[0].text.clone();
+    state.tick = 1;
+    let text1 = state.logs_spec(1, 11).rows[0].text.clone();
+    assert_ne!(text0, text1);
+}

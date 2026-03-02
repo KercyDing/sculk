@@ -195,8 +195,12 @@ impl AppState {
     }
 
     /// 生成 Logs 渲染规格。
-    pub(crate) fn logs_spec(&self, visible_height: usize) -> ui_specs::LogsSpec {
-        ui_specs::logs_spec(self, visible_height)
+    pub(crate) fn logs_spec(
+        &self,
+        visible_height: usize,
+        message_width: usize,
+    ) -> ui_specs::LogsSpec {
+        ui_specs::logs_spec(self, visible_height, message_width)
     }
 
     /// 生成 Tabs 渲染规格。

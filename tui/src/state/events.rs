@@ -41,7 +41,9 @@ pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
             state.add_log("已成功连入隧道");
 
             state.ctx.profile.join.last_ticket = Some(state.join_ticket.value.clone());
-            let _ = persist::save_profile(&state.ctx.profile);
+            if let Err(e) = persist::save_profile(&state.ctx.profile) {
+                state.add_log(&format!("配置保存失败: {e}"));
+            }
 
             state.ctx.event_forwarder = Some(tunnel::spawn_event_forwarder(
                 events,
@@ -53,6 +55,9 @@ pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
             state.phase = TunnelPhase::Idle;
             state.quit_pressed_at = None;
             state.active_mode = None;
+            state.add_log(&msg);
+        }
+        AppEvent::CloseFailed(msg) => {
             state.add_log(&msg);
         }
         AppEvent::Closed => {

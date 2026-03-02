@@ -33,7 +33,14 @@ pub async fn run_tui() -> anyhow::Result<()> {
         tokio::select! {
             maybe_event = event_stream.next() => {
                 let Some(event_result) = maybe_event else { break };
-                let Event::Key(key) = event_result? else { continue };
+                let event = match event_result {
+                    Ok(event) => event,
+                    Err(e) => {
+                        state.add_log(&format!("事件读取失败: {e}"));
+                        continue;
+                    }
+                };
+                let Event::Key(key) = event else { continue };
                 if key.kind == KeyEventKind::Release { continue }
                 if matches!(state.handle_key(key), Step::Exit) { break }
             }
