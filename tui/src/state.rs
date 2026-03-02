@@ -201,31 +201,40 @@ impl AppState {
         }
 
         if key.code == KeyCode::Esc {
-            // 启动中：直接中止，无需确认
-            if self.phase == TunnelPhase::Starting {
-                if let Some(handle) = self.startup_handle.take() {
-                    handle.abort();
+            match self.phase {
+                // 启动中：直接中止，无需确认
+                TunnelPhase::Starting => {
+                    if let Some(handle) = self.startup_handle.take() {
+                        handle.abort();
+                    }
+                    self.phase = TunnelPhase::Idle;
+                    self.active_mode = None;
+                    self.quit_pressed_at = None;
+                    self.add_log("已取消启动");
+                    return Step::Continue;
                 }
-                self.phase = TunnelPhase::Idle;
-                self.active_mode = None;
-                self.add_log("已取消启动");
-                return Step::Continue;
+                // 隧道运行中：Esc 弹出中止确认，而非计入退出计数
+                TunnelPhase::Active => {
+                    self.quit_pressed_at = None;
+                    self.confirm_stop = true;
+                    return Step::Continue;
+                }
+                // 关闭中：忽略 Esc，直到完全断开后才允许退出
+                TunnelPhase::Stopping => {
+                    self.quit_pressed_at = None;
+                    return Step::Continue;
+                }
+                TunnelPhase::Idle => {
+                    let now = Instant::now();
+                    if let Some(prev) = self.quit_pressed_at
+                        && now.duration_since(prev).as_secs() < 3
+                    {
+                        return Step::Exit;
+                    }
+                    self.quit_pressed_at = Some(now);
+                    return Step::Continue;
+                }
             }
-
-            // 隧道运行中：Esc 弹出中止确认，而非计入退出计数
-            if self.phase == TunnelPhase::Active {
-                self.confirm_stop = true;
-                return Step::Continue;
-            }
-
-            let now = Instant::now();
-            if let Some(prev) = self.quit_pressed_at
-                && now.duration_since(prev).as_secs() < 3
-            {
-                return Step::Exit;
-            }
-            self.quit_pressed_at = Some(now);
-            return Step::Continue;
         }
         self.quit_pressed_at = None;
 
@@ -385,6 +394,7 @@ impl AppState {
 
                 self.phase = TunnelPhase::Starting;
                 self.active_mode = Some(ActiveTab::Host);
+                self.quit_pressed_at = None;
                 self.add_log(&format!("正在启动 host 隧道 (端口 {port})..."));
                 self.startup_handle = Some(tunnel::spawn_host(
                     port,
@@ -425,6 +435,7 @@ impl AppState {
 
                 self.phase = TunnelPhase::Starting;
                 self.active_mode = Some(ActiveTab::Join);
+                self.quit_pressed_at = None;
                 self.add_log("正在连接...");
                 self.startup_handle = Some(tunnel::spawn_join(
                     &self.join_ticket.value,
@@ -496,6 +507,7 @@ impl AppState {
         }
         if let Some(t) = self.tunnel.take() {
             self.phase = TunnelPhase::Stopping;
+            self.quit_pressed_at = None;
             self.add_log("正在关闭隧道...");
             tunnel::spawn_close(t, self.app_tx.clone());
         }
@@ -513,6 +525,7 @@ impl AppState {
             } => {
                 self.startup_handle = None;
                 self.phase = TunnelPhase::Active;
+                self.quit_pressed_at = None;
                 self.tunnel = Some(tunnel);
 
                 let quoted = format!("\"{ticket}\"");
@@ -529,6 +542,7 @@ impl AppState {
             AppEvent::JoinConnected { tunnel, events } => {
                 self.startup_handle = None;
                 self.phase = TunnelPhase::Active;
+                self.quit_pressed_at = None;
                 self.tunnel = Some(tunnel);
                 self.add_log("已成功连入隧道");
 
@@ -542,11 +556,13 @@ impl AppState {
             AppEvent::StartFailed(msg) => {
                 self.startup_handle = None;
                 self.phase = TunnelPhase::Idle;
+                self.quit_pressed_at = None;
                 self.active_mode = None;
                 self.add_log(&msg);
             }
             AppEvent::Closed => {
                 self.phase = TunnelPhase::Idle;
+                self.quit_pressed_at = None;
                 self.active_mode = None;
                 self.tunnel = None;
                 self.ticket = None;
@@ -667,6 +683,30 @@ impl AppState {
         } else {
             format!("{}", self.connections.len())
         }
+    }
+
+    /// Esc 键在当前阶段对应的操作文案。
+    ///
+    /// Purpose: 让 UI 与按键语义保持一致，避免在隧道生命周期内误导为“退出”。
+    /// Args: 无（读取 `self.phase`）。
+    /// Returns: `Idle` 返回 "退出"，其余阶段返回 "断开"。
+    /// Edge Cases: `Starting` / `Stopping` 也视作隧道生命周期中，统一返回 "断开"。
+    pub fn esc_action_label(&self) -> &'static str {
+        if self.phase == TunnelPhase::Idle {
+            "退出"
+        } else {
+            "断开"
+        }
+    }
+
+    /// 当前是否允许通过 Esc 双击退出程序。
+    ///
+    /// Purpose: 统一退出可用性判断，确保“仅完全断开后才可退出”。
+    /// Args: 无（读取 `self.phase`）。
+    /// Returns: 仅当阶段为 `Idle` 时返回 `true`。
+    /// Edge Cases: `Starting` / `Active` / `Stopping` 一律返回 `false`。
+    pub fn esc_can_exit(&self) -> bool {
+        self.phase == TunnelPhase::Idle
     }
 
     pub fn relay_label(&self) -> &str {
@@ -884,7 +924,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use tokio::sync::mpsc;
 
-    use super::{ActiveTab, AppState, FocusPane, InputMode, RELAYS, Step};
+    use super::{ActiveTab, AppState, FocusPane, InputMode, RELAYS, Step, TunnelPhase};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -916,6 +956,22 @@ mod tests {
             state.handle_key(key(KeyCode::Esc)),
             Step::Continue
         ));
+        assert!(matches!(
+            state.handle_key(key(KeyCode::Esc)),
+            Step::Continue
+        ));
+    }
+
+    #[test]
+    fn esc_does_not_exit_while_stopping() {
+        let mut state = test_state();
+        state.phase = TunnelPhase::Stopping;
+
+        assert!(matches!(
+            state.handle_key(key(KeyCode::Esc)),
+            Step::Continue
+        ));
+        assert!(state.quit_pressed_at.is_none());
         assert!(matches!(
             state.handle_key(key(KeyCode::Esc)),
             Step::Continue
@@ -1083,5 +1139,26 @@ mod tests {
         assert_eq!(state.phase, TunnelPhase::Idle);
         assert!(state.active_mode.is_none());
         assert!(state.logs.last().unwrap().contains("test error"));
+    }
+
+    #[test]
+    fn esc_action_label_changes_with_phase() {
+        let mut state = test_state();
+
+        state.phase = TunnelPhase::Idle;
+        assert_eq!(state.esc_action_label(), "退出");
+        assert!(state.esc_can_exit());
+
+        state.phase = TunnelPhase::Starting;
+        assert_eq!(state.esc_action_label(), "断开");
+        assert!(!state.esc_can_exit());
+
+        state.phase = TunnelPhase::Active;
+        assert_eq!(state.esc_action_label(), "断开");
+        assert!(!state.esc_can_exit());
+
+        state.phase = TunnelPhase::Stopping;
+        assert_eq!(state.esc_action_label(), "断开");
+        assert!(!state.esc_can_exit());
     }
 }

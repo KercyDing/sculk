@@ -41,13 +41,13 @@ pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
         Span::styled("h", Style::default().fg(ACCENT)),
         Span::raw(" 帮助  "),
         Span::styled("Esc", Style::default().fg(ERROR)),
-        Span::raw(" 退出"),
+        Span::raw(format!(" {}", state.esc_action_label())),
     ]))
     .alignment(Alignment::Left)
     .style(Style::default().bg(PANEL));
     frame.render_widget(footer, area);
 
-    if state.quit_pressed_at.is_some() {
+    if state.esc_can_exit() && state.quit_pressed_at.is_some() {
         let hint = Paragraph::new(Line::from(vec![Span::styled(
             "再次按 Esc 退出",
             Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
