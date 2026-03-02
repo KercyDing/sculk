@@ -30,7 +30,7 @@ uninstall-all: uninstall uninstall-tui
 check:
     cargo fmt --all -- --check
     cargo check --workspace
-    cargo clippy --workspace -- -D warnings
+    cargo clippy --workspace --all-targets --all-features
 
 # 离线测试
 test:

@@ -115,10 +115,23 @@ pub(super) async fn reconnect_supervisor(
         conn = reconnected;
         conn_info = conn.to_info();
 
-        {
-            let mut g = ctx.conns.lock().unwrap();
-            g.retain(|c| c.is_alive());
-            g.push(conn_info.clone());
+        let lock_error = {
+            match super::lock_mutex(&ctx.conns, "join connections") {
+                Ok(mut guard) => {
+                    guard.retain(|c| c.is_alive());
+                    guard.push(conn_info.clone());
+                    None
+                }
+                Err(e) => Some(e),
+            }
+        };
+        if let Some(e) = lock_error {
+            let _ = tx
+                .send(TunnelEvent::Error {
+                    message: e.to_string(),
+                })
+                .await;
+            return;
         }
 
         let _ = tx.send(TunnelEvent::Reconnected).await;
@@ -166,7 +179,7 @@ pub(super) async fn connect_with_retry(
     endpoint_id: iroh::EndpointId,
     config: &TunnelConfig,
     tx: &mpsc::Sender<TunnelEvent>,
-) -> anyhow::Result<Connection> {
+) -> crate::Result<Connection> {
     let max = config.initial_retries;
     let mut last_err = None;
 
@@ -200,13 +213,23 @@ pub(super) async fn connect_with_retry(
         }
     }
 
-    Err(last_err.unwrap().into())
+    if let Some(err) = last_err {
+        Err(crate::error::TunnelError::ConnectHostEndpoint(err.to_string()).into())
+    } else {
+        Err(crate::error::TunnelError::InitialConnectionExhausted {
+            attempts: max.saturating_add(1),
+        }
+        .into())
+    }
 }
 
 /// Join 侧本地监听并转发到 QUIC 双向流。
-async fn join_accept_loop(conn: Connection, listener: Arc<TcpListener>) -> anyhow::Result<()> {
+async fn join_accept_loop(conn: Connection, listener: Arc<TcpListener>) -> crate::Result<()> {
     loop {
-        let (tcp, peer) = listener.accept().await?;
+        let (tcp, peer) = listener
+            .accept()
+            .await
+            .map_err(|e| crate::error::TunnelError::AcceptLocalTcpClient(e.to_string()))?;
         tracing::info!(%peer, "MC client connected");
 
         let conn = conn.clone();

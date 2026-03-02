@@ -115,7 +115,10 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             password,
             max_players,
         } => {
-            let path = key_path.unwrap_or_else(persist::default_key_path);
+            let path = match key_path {
+                Some(path) => path,
+                None => persist::default_key_path()?,
+            };
             let secret_key = if new_key {
                 persist::generate_new_key(&path)?
             } else {
@@ -220,11 +223,11 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
                     println!("Using default n0 relay servers.");
                 }
             } else {
-                Cli::command()
+                let mut relay_subcommand = Cli::command()
                     .find_subcommand("relay")
-                    .expect("relay subcommand should exist")
-                    .clone()
-                    .print_help()?;
+                    .ok_or_else(|| anyhow::anyhow!("relay subcommand should exist"))?
+                    .clone();
+                relay_subcommand.print_help()?;
             }
         }
     }
@@ -266,13 +269,17 @@ mod tests {
 
     #[test]
     fn parse_host_command_from_args() {
-        let cli = Cli::try_parse_from(["sculk", "host", "-p", "25565"]).expect("parse host");
+        let cli_res = Cli::try_parse_from(["sckc", "host", "-p", "25565"]);
+        assert!(cli_res.is_ok(), "parse host");
+        let cli = if let Ok(v) = cli_res { v } else { return };
         assert!(matches!(cli.command, Commands::Host { port: 25565, .. }));
     }
 
     #[test]
     fn parse_join_defaults() {
-        let cli = Cli::try_parse_from(["sculk", "join", "ticket"]).expect("parse join");
+        let cli_res = Cli::try_parse_from(["sckc", "join", "ticket"]);
+        assert!(cli_res.is_ok(), "parse join");
+        let cli = if let Ok(v) = cli_res { v } else { return };
         assert!(
             matches!(cli.command, Commands::Join { port, .. } if port == sculk::DEFAULT_INLET_PORT)
         );

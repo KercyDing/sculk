@@ -27,3 +27,6 @@ unicode-width = "0.2"
 [[bin]]
 name = "sckt"
 path = "src/main.rs"
+
+[lints]
+workspace = true

@@ -30,7 +30,13 @@ pub(crate) fn toggle_host(state: &mut AppState) {
                 Some(state.host_password.value.clone())
             };
 
-            let key_path = persist::default_key_path();
+            let key_path = match persist::default_key_path() {
+                Ok(path) => path,
+                Err(e) => {
+                    state.add_log(&format!("密钥路径获取失败: {e}"));
+                    return;
+                }
+            };
             let secret_key = match persist::load_or_generate_key(&key_path) {
                 Ok(k) => k,
                 Err(e) => {
@@ -120,7 +126,10 @@ pub(crate) fn apply_relay(state: &mut AppState) {
         state.add_log("隧道运行中，无法切换中继");
         return;
     }
-    let selected = state.relay_state.selected().unwrap_or(state.relay_idx);
+    let selected = match state.relay_state.selected() {
+        Some(idx) => idx,
+        None => state.relay_idx,
+    };
 
     match selected {
         0 => {

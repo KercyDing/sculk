@@ -2,10 +2,11 @@
 
 use std::path::Path;
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use super::data_dir;
+use crate::Result;
+use crate::error::PersistError;
 
 const PROFILE_FILE: &str = "profile.toml";
 
@@ -80,45 +81,56 @@ fn default_inlet_port() -> u16 {
 
 impl Profile {
     /// 配置文件路径。
-    pub fn path() -> std::path::PathBuf {
-        data_dir().join(PROFILE_FILE)
+    pub fn path() -> Result<std::path::PathBuf> {
+        Ok(data_dir()?.join(PROFILE_FILE))
     }
 
     /// 加载配置。文件不存在时创建默认配置并写入磁盘。
-    pub fn load() -> anyhow::Result<Self> {
-        let path = Self::path();
+    pub fn load() -> Result<Self> {
+        let path = Self::path()?;
         Self::load_from(&path)
     }
 
     /// 从指定路径加载配置。文件不存在时写入默认值。
-    pub fn load_from(path: &Path) -> anyhow::Result<Self> {
+    pub fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
             let profile = Self::default();
             profile.save_to(path)?;
             return Ok(profile);
         }
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read profile: {}", path.display()))?;
-        let profile: Self = toml::from_str(&content)
-            .with_context(|| format!("failed to parse profile: {}", path.display()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| PersistError::PathIo {
+            op: "read profile",
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+        let profile: Self = toml::from_str(&content).map_err(|e| PersistError::ProfileParse {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
         Ok(profile)
     }
 
     /// 保存配置到默认路径。
-    pub fn save(&self) -> anyhow::Result<()> {
-        let path = Self::path();
+    pub fn save(&self) -> Result<()> {
+        let path = Self::path()?;
         self.save_to(&path)
     }
 
     /// 保存配置到指定路径。
-    pub fn save_to(&self, path: &Path) -> anyhow::Result<()> {
+    pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create config dir: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| PersistError::PathIo {
+                op: "create config dir",
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
         }
-        let content = toml::to_string_pretty(self).context("failed to serialize profile")?;
-        std::fs::write(path, content)
-            .with_context(|| format!("failed to write profile: {}", path.display()))?;
+        let content = toml::to_string_pretty(self).map_err(PersistError::ProfileSerialize)?;
+        std::fs::write(path, content).map_err(|e| PersistError::PathIo {
+            op: "write profile",
+            path: path.to_path_buf(),
+            source: e,
+        })?;
         Ok(())
     }
 
@@ -129,7 +141,7 @@ impl Profile {
     pub fn resolve_relay_url(
         &self,
         custom: Option<&str>,
-    ) -> anyhow::Result<Option<crate::tunnel::RelayUrl>> {
+    ) -> Result<Option<crate::tunnel::RelayUrl>> {
         let url_str = custom.or(if self.relay.custom {
             self.relay.url.as_deref()
         } else {
@@ -138,8 +150,8 @@ impl Profile {
         match url_str {
             Some(s) => {
                 let url: crate::tunnel::RelayUrl = s
-                    .parse()
-                    .map_err(|e| anyhow::anyhow!("invalid relay URL: {e}"))?;
+                    .parse::<crate::tunnel::RelayUrl>()
+                    .map_err(|e| PersistError::RelayUrlParse(e.to_string()))?;
                 Ok(Some(url))
             }
             None => Ok(None),
@@ -169,8 +181,12 @@ mod tests {
         p.relay.custom = true;
         p.relay.url = Some("https://relay.example.com".to_string());
 
-        let s = toml::to_string_pretty(&p).unwrap();
-        let p2: Profile = toml::from_str(&s).unwrap();
+        let s_res = toml::to_string_pretty(&p);
+        assert!(s_res.is_ok(), "serialize profile failed");
+        let s = if let Ok(v) = s_res { v } else { return };
+        let p2_res: std::result::Result<Profile, toml::de::Error> = toml::from_str(&s);
+        assert!(p2_res.is_ok(), "deserialize profile failed");
+        let p2 = if let Ok(v) = p2_res { v } else { return };
 
         assert_eq!(p2.host.port, 12345);
         assert_eq!(p2.join.last_ticket.as_deref(), Some("sculk://test"));
@@ -181,7 +197,9 @@ mod tests {
     #[test]
     fn partial_toml_uses_defaults() {
         let s = "[host]\nport = 9999\n";
-        let p: Profile = toml::from_str(s).unwrap();
+        let p_res: std::result::Result<Profile, toml::de::Error> = toml::from_str(s);
+        assert!(p_res.is_ok(), "deserialize partial profile failed");
+        let p = if let Ok(v) = p_res { v } else { return };
         assert_eq!(p.host.port, 9999);
         assert_eq!(p.join.port, crate::DEFAULT_INLET_PORT);
         assert!(p.relay.url.is_none());
@@ -195,9 +213,12 @@ mod tests {
 
         let mut p = Profile::default();
         p.host.port = 11111;
-        p.save_to(&path).unwrap();
+        let save_res = p.save_to(&path);
+        assert!(save_res.is_ok(), "save profile failed");
 
-        let loaded = Profile::load_from(&path).unwrap();
+        let loaded_res = Profile::load_from(&path);
+        assert!(loaded_res.is_ok(), "load profile failed");
+        let loaded = if let Ok(v) = loaded_res { v } else { return };
         assert_eq!(loaded.host.port, 11111);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -209,7 +230,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("profile.toml");
 
-        let p = Profile::load_from(&path).unwrap();
+        let p_res = Profile::load_from(&path);
+        assert!(p_res.is_ok(), "load missing profile failed");
+        let p = if let Ok(v) = p_res { v } else { return };
         assert_eq!(p.host.port, crate::DEFAULT_MC_PORT);
         // 文件应该已被创建
         assert!(path.exists());

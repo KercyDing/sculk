@@ -7,16 +7,16 @@ pub(super) async fn bridge(
     mut send: SendStream,
     mut recv: RecvStream,
     tcp: TcpStream,
-) -> anyhow::Result<()> {
+) -> crate::Result<()> {
     let (mut tcp_read, mut tcp_write) = tcp.into_split();
 
     tokio::select! {
         r = tokio::io::copy(&mut tcp_read, &mut send) => {
             let _ = send.finish();
-            r?;
+            r.map_err(|e| crate::error::TunnelError::BridgeTcpToQuic(e.to_string()))?;
         }
         r = tokio::io::copy(&mut recv, &mut tcp_write) => {
-            r?;
+            r.map_err(|e| crate::error::TunnelError::BridgeQuicToTcp(e.to_string()))?;
         }
     }
 

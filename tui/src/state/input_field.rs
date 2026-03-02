@@ -32,11 +32,10 @@ impl InputField {
 
     pub fn backspace(&mut self) {
         if self.cursor > 0 {
-            let prev = self.value[..self.cursor]
-                .char_indices()
-                .next_back()
-                .map(|(i, _)| i)
-                .unwrap_or(0);
+            let prev = match self.value[..self.cursor].char_indices().next_back() {
+                Some((i, _)) => i,
+                None => 0,
+            };
             self.value.drain(prev..self.cursor);
             self.cursor = prev;
         }
@@ -44,32 +43,29 @@ impl InputField {
 
     pub fn delete(&mut self) {
         if self.cursor < self.value.len() {
-            let next = self.value[self.cursor..]
-                .char_indices()
-                .nth(1)
-                .map(|(i, _)| self.cursor + i)
-                .unwrap_or(self.value.len());
+            let next = match self.value[self.cursor..].char_indices().nth(1) {
+                Some((i, _)) => self.cursor + i,
+                None => self.value.len(),
+            };
             self.value.drain(self.cursor..next);
         }
     }
 
     pub fn move_left(&mut self) {
         if self.cursor > 0 {
-            self.cursor = self.value[..self.cursor]
-                .char_indices()
-                .next_back()
-                .map(|(i, _)| i)
-                .unwrap_or(0);
+            self.cursor = match self.value[..self.cursor].char_indices().next_back() {
+                Some((i, _)) => i,
+                None => 0,
+            };
         }
     }
 
     pub fn move_right(&mut self) {
         if self.cursor < self.value.len() {
-            self.cursor = self.value[self.cursor..]
-                .char_indices()
-                .nth(1)
-                .map(|(i, _)| self.cursor + i)
-                .unwrap_or(self.value.len());
+            self.cursor = match self.value[self.cursor..].char_indices().nth(1) {
+                Some((i, _)) => self.cursor + i,
+                None => self.value.len(),
+            };
         }
     }
 

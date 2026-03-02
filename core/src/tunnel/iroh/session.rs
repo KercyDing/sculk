@@ -83,7 +83,7 @@ mod tests {
 
     fn test_endpoint_id() -> EndpointId {
         let bytes: [u8; 32] = rand::random();
-        SecretKey::from_bytes(&bytes).public().into()
+        SecretKey::from_bytes(&bytes).public()
     }
 
     #[test]

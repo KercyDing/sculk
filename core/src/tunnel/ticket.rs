@@ -7,6 +7,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use crate::error::TicketError;
 use iroh::{EndpointId, RelayUrl};
 
 const SCHEME: &str = "sculk";
@@ -38,36 +39,34 @@ impl fmt::Display for Ticket {
 }
 
 impl FromStr for Ticket {
-    type Err = anyhow::Error;
+    type Err = TicketError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let url = url::Url::parse(s)?;
 
         if url.scheme() != SCHEME {
-            anyhow::bail!(
-                "invalid scheme: expected \"{SCHEME}\", got \"{}\"",
-                url.scheme()
-            );
+            return Err(TicketError::InvalidScheme {
+                expected: SCHEME,
+                actual: url.scheme().to_string(),
+            });
         }
 
-        let host = url
-            .host_str()
-            .ok_or_else(|| anyhow::anyhow!("missing endpoint id in ticket URL"))?;
+        let host = url.host_str().ok_or(TicketError::MissingEndpointId)?;
 
         if host.is_empty() {
-            anyhow::bail!("missing endpoint id in ticket URL");
+            return Err(TicketError::MissingEndpointId);
         }
 
         let endpoint_id: EndpointId = host
-            .parse()
-            .map_err(|e| anyhow::anyhow!("invalid endpoint id: {e}"))?;
+            .parse::<EndpointId>()
+            .map_err(|e| TicketError::EndpointIdParse(e.to_string()))?;
 
         let relay_url = url
             .query_pairs()
             .find(|(k, _)| k == "relay")
             .map(|(_, v)| v.parse::<RelayUrl>())
             .transpose()
-            .map_err(|e| anyhow::anyhow!("invalid relay URL: {e}"))?;
+            .map_err(|e| TicketError::RelayUrlParse(e.to_string()))?;
 
         Ok(Self {
             endpoint_id,
@@ -82,25 +81,35 @@ mod tests {
 
     fn test_endpoint_id() -> EndpointId {
         let bytes: [u8; 32] = rand::random();
-        iroh::SecretKey::from_bytes(&bytes).public().into()
+        iroh::SecretKey::from_bytes(&bytes).public()
     }
 
     #[test]
     fn roundtrip_with_relay() {
         let id = test_endpoint_id();
-        let relay: RelayUrl = "https://my-relay.example.com".parse().unwrap();
+        let relay_res = "https://my-relay.example.com".parse::<RelayUrl>();
+        assert!(relay_res.is_ok(), "parse relay failed");
+        let relay = if let Ok(v) = relay_res { v } else { return };
         let ticket = Ticket::new(id, Some(relay.clone()));
 
         let s = ticket.to_string();
         assert!(s.starts_with("sculk://"));
         assert!(s.contains("relay="));
 
-        let parsed: Ticket = s.parse().unwrap();
+        let parsed_res: std::result::Result<Ticket, TicketError> = s.parse();
+        assert!(parsed_res.is_ok(), "parse ticket failed");
+        let parsed = if let Ok(v) = parsed_res { v } else { return };
         assert_eq!(parsed.endpoint_id, id);
         assert_eq!(parsed.relay_url.as_ref(), Some(&relay));
 
         let s2 = parsed.to_string();
-        let reparsed: Ticket = s2.parse().unwrap();
+        let reparsed_res: std::result::Result<Ticket, TicketError> = s2.parse();
+        assert!(reparsed_res.is_ok(), "reparse ticket failed");
+        let reparsed = if let Ok(v) = reparsed_res {
+            v
+        } else {
+            return;
+        };
         assert_eq!(reparsed.endpoint_id, id);
         assert_eq!(reparsed.relay_url.as_ref(), Some(&relay));
     }
@@ -114,12 +123,20 @@ mod tests {
         assert!(s.starts_with("sculk://"));
         assert!(!s.contains("relay="));
 
-        let parsed: Ticket = s.parse().unwrap();
+        let parsed_res: std::result::Result<Ticket, TicketError> = s.parse();
+        assert!(parsed_res.is_ok(), "parse ticket failed");
+        let parsed = if let Ok(v) = parsed_res { v } else { return };
         assert_eq!(parsed.endpoint_id, id);
         assert!(parsed.relay_url.is_none());
 
         let s2 = parsed.to_string();
-        let reparsed: Ticket = s2.parse().unwrap();
+        let reparsed_res: std::result::Result<Ticket, TicketError> = s2.parse();
+        assert!(reparsed_res.is_ok(), "reparse ticket failed");
+        let reparsed = if let Ok(v) = reparsed_res {
+            v
+        } else {
+            return;
+        };
         assert_eq!(reparsed.endpoint_id, id);
         assert!(reparsed.relay_url.is_none());
     }
@@ -128,7 +145,11 @@ mod tests {
     fn reject_bad_scheme() {
         let result = "http://abc".parse::<Ticket>();
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = if let Err(e) = result {
+            e.to_string()
+        } else {
+            return;
+        };
         assert!(err.contains("invalid scheme"), "unexpected error: {err}");
     }
 

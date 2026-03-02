@@ -24,3 +24,9 @@ rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 url = "2.5"
+thiserror = "2"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

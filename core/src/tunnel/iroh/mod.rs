@@ -15,6 +15,8 @@ use tokio::task::JoinHandle;
 
 use super::event::{ConnectionSnapshot, TunnelConfig, TunnelEvent};
 use super::ticket::Ticket;
+use crate::Result;
+use crate::error::TunnelError;
 
 mod auth;
 mod endpoint;
@@ -52,10 +54,13 @@ impl IrohTunnel {
         secret_key: Option<SecretKey>,
         relay_url: Option<RelayUrl>,
         config: TunnelConfig,
-    ) -> anyhow::Result<(Self, Ticket, mpsc::Receiver<TunnelEvent>)> {
+    ) -> Result<(Self, Ticket, mpsc::Receiver<TunnelEvent>)> {
         let mut builder = build_endpoint(secret_key, relay_url.as_ref());
         builder = builder.alpns(vec![ALPN.to_vec()]);
-        let endpoint = builder.bind().await?;
+        let endpoint = builder
+            .bind()
+            .await
+            .map_err(|e| TunnelError::BindHostEndpoint(e.to_string()))?;
         endpoint.online().await;
 
         let ticket = Ticket::new(endpoint.id(), relay_url);
@@ -101,10 +106,11 @@ impl IrohTunnel {
         ticket: &Ticket,
         local_port: u16,
         config: TunnelConfig,
-    ) -> anyhow::Result<(Self, mpsc::Receiver<TunnelEvent>)> {
+    ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
         let endpoint = build_endpoint(None, ticket.relay_url.as_ref())
             .bind()
-            .await?;
+            .await
+            .map_err(|e| TunnelError::BindJoinEndpoint(e.to_string()))?;
 
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
@@ -112,10 +118,14 @@ impl IrohTunnel {
         let conn = connect_with_retry(&endpoint, ticket.endpoint_id, &config, &tx).await?;
 
         let conn_info = conn.to_info();
-        conns.lock().unwrap().push(conn_info.clone());
+        lock_mutex(&conns, "join connections")?.push(conn_info.clone());
         let _ = tx.send(TunnelEvent::Connected).await;
 
-        let listener = Arc::new(TcpListener::bind(("127.0.0.1", local_port)).await?);
+        let listener = Arc::new(
+            TcpListener::bind(("127.0.0.1", local_port))
+                .await
+                .map_err(|e| TunnelError::BindLocalListener(e.to_string()))?,
+        );
         tracing::info!(local_port, "listening for MC clients");
 
         let ep = endpoint.clone();
@@ -144,11 +154,11 @@ impl IrohTunnel {
     }
 
     /// 返回当前活跃连接快照。
-    pub fn connections(&self) -> Vec<ConnectionSnapshot> {
-        let mut guard = self.conns.lock().unwrap();
+    pub fn connections(&self) -> Result<Vec<ConnectionSnapshot>> {
+        let mut guard = lock_mutex(&self.conns, "tunnel connections")?;
         guard.retain(|c| c.is_alive());
 
-        guard
+        let snapshots: Vec<ConnectionSnapshot> = guard
             .iter()
             .map(|info| {
                 let path = info.selected_path();
@@ -174,7 +184,8 @@ impl IrohTunnel {
                     timestamp: Instant::now(),
                 }
             })
-            .collect()
+            .collect();
+        Ok(snapshots)
     }
 
     /// 返回本机 EndpointId。
@@ -187,4 +198,13 @@ impl IrohTunnel {
         let _ = self.shutdown.send(true);
         self.endpoint.close().await;
     }
+}
+
+pub(super) fn lock_mutex<'a, T>(
+    mutex: &'a Arc<Mutex<T>>,
+    name: &'static str,
+) -> Result<std::sync::MutexGuard<'a, T>> {
+    mutex
+        .lock()
+        .map_err(|_| TunnelError::mutex_poisoned(name).into())
 }

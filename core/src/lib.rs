@@ -17,7 +17,7 @@
 //! ```no_run
 //! use sculk::tunnel::{IrohTunnel, TunnelConfig};
 //!
-//! # async fn demo() -> anyhow::Result<()> {
+//! # async fn demo() -> sculk::Result<()> {
 //! let (_tunnel, ticket, mut events) =
 //!     IrohTunnel::host(25565, None, None, TunnelConfig::default()).await?;
 //! println!("share ticket: {ticket}");
@@ -34,7 +34,7 @@
 //! ```no_run
 //! use sculk::tunnel::{IrohTunnel, Ticket, TunnelConfig};
 //!
-//! # async fn demo() -> anyhow::Result<()> {
+//! # async fn demo() -> sculk::Result<()> {
 //! let ticket: Ticket = "sculk://<endpoint-id>".parse()?;
 //! let (_tunnel, mut events) = IrohTunnel::join(&ticket, 30000, TunnelConfig::default()).await?;
 //!
@@ -53,9 +53,12 @@
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+pub mod error;
 #[cfg(feature = "persist")]
 pub mod persist;
 pub mod tunnel;
+
+pub use error::{Result, SculkError};
 
 /// Minecraft 服务端标准端口。
 pub const DEFAULT_MC_PORT: u16 = 25565;

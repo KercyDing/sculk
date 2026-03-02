@@ -111,6 +111,13 @@ pub(crate) fn on_tick(state: &mut AppState) {
     if state.phase == TunnelPhase::Active
         && let Some(ref tunnel) = state.ctx.tunnel
     {
-        state.connections = tunnel.connections();
+        match tunnel.connections() {
+            Ok(connections) => {
+                state.connections = connections;
+            }
+            Err(e) => {
+                state.add_log(&format!("连接快照更新失败: {e}"));
+            }
+        }
     }
 }

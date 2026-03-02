@@ -11,17 +11,20 @@ mod profile;
 
 use std::path::PathBuf;
 
+use crate::Result;
+use crate::error::PersistError;
+
 pub use key::{generate_new_key, load_or_generate_key};
 pub use profile::{HostProfile, JoinProfile, Profile, RelayProfile};
 
 /// 应用数据目录。
-pub fn data_dir() -> PathBuf {
+pub fn data_dir() -> Result<PathBuf> {
     dirs::data_dir()
-        .expect("cannot determine system data directory")
-        .join("sculk")
+        .map(|path| path.join("sculk"))
+        .ok_or_else(|| PersistError::SystemDataDirUnavailable.into())
 }
 
 /// 默认密钥文件路径。
-pub fn default_key_path() -> PathBuf {
-    data_dir().join("secret.key")
+pub fn default_key_path() -> Result<PathBuf> {
+    Ok(data_dir()?.join("secret.key"))
 }

@@ -25,7 +25,7 @@ pub fn load_profile() -> (sculk::persist::Profile, Option<String>) {
 /// Edge Cases: 测试环境直接返回成功，避免依赖宿主文件系统。
 #[cfg(not(test))]
 pub fn save_profile(profile: &sculk::persist::Profile) -> Result<()> {
-    profile.save()
+    Ok(profile.save()?)
 }
 
 /// 测试环境下跳过落盘写入。
@@ -44,7 +44,7 @@ pub fn resolve_relay_url(
     profile: &sculk::persist::Profile,
     custom: Option<&str>,
 ) -> Result<Option<sculk::tunnel::RelayUrl>> {
-    profile.resolve_relay_url(custom)
+    Ok(profile.resolve_relay_url(custom)?)
 }
 
 /// 返回默认密钥路径。
@@ -53,8 +53,8 @@ pub fn resolve_relay_url(
 /// Args: 无。
 /// Returns: 密钥文件路径。
 /// Edge Cases: 由底层库决定路径可用性。
-pub fn default_key_path() -> PathBuf {
-    sculk::persist::default_key_path()
+pub fn default_key_path() -> Result<PathBuf> {
+    sculk::persist::default_key_path().map_err(Into::into)
 }
 
 /// 读取或生成密钥。
@@ -64,7 +64,7 @@ pub fn default_key_path() -> PathBuf {
 /// Returns: 成功时返回密钥。
 /// Edge Cases: 文件系统错误时返回失败。
 pub fn load_or_generate_key(path: &Path) -> Result<sculk::tunnel::SecretKey> {
-    sculk::persist::load_or_generate_key(path)
+    Ok(sculk::persist::load_or_generate_key(path)?)
 }
 
 /// 尝试复制内容到剪贴板。

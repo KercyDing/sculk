@@ -2,14 +2,14 @@
 
 use std::path::Path;
 
-use anyhow::{Context, ensure};
-
+use crate::Result;
+use crate::error::PersistError;
 use crate::tunnel::SecretKey;
 
 const KEY_LEN: usize = 32;
 
 /// 从文件加载密钥；若文件不存在则生成新密钥并保存。
-pub fn load_or_generate_key(path: &Path) -> anyhow::Result<SecretKey> {
+pub fn load_or_generate_key(path: &Path) -> Result<SecretKey> {
     if path.exists() {
         load_key(path)
     } else {
@@ -18,29 +18,43 @@ pub fn load_or_generate_key(path: &Path) -> anyhow::Result<SecretKey> {
 }
 
 /// 强制重新生成新密钥并保存。
-pub fn generate_new_key(path: &Path) -> anyhow::Result<SecretKey> {
+pub fn generate_new_key(path: &Path) -> Result<SecretKey> {
     let bytes: [u8; KEY_LEN] = rand::random();
     let key = SecretKey::from_bytes(&bytes);
     save_key(path, &key)?;
     Ok(key)
 }
 
-fn load_key(path: &Path) -> anyhow::Result<SecretKey> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("failed to read key file: {}", path.display()))?;
-    ensure!(
-        bytes.len() == KEY_LEN,
-        "invalid key file length: expected {KEY_LEN} bytes, got {} bytes",
-        bytes.len()
-    );
-    let arr: [u8; KEY_LEN] = bytes.try_into().unwrap();
+fn load_key(path: &Path) -> Result<SecretKey> {
+    let bytes = std::fs::read(path).map_err(|e| PersistError::PathIo {
+        op: "read key file",
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    if bytes.len() != KEY_LEN {
+        return Err(PersistError::InvalidKeyLength {
+            expected: KEY_LEN,
+            actual: bytes.len(),
+        }
+        .into());
+    }
+    let arr: [u8; KEY_LEN] =
+        bytes
+            .try_into()
+            .map_err(|v: Vec<u8>| PersistError::InvalidKeyLength {
+                expected: KEY_LEN,
+                actual: v.len(),
+            })?;
     Ok(SecretKey::from_bytes(&arr))
 }
 
-fn save_key(path: &Path, key: &SecretKey) -> anyhow::Result<()> {
+fn save_key(path: &Path, key: &SecretKey) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create key directory: {}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| PersistError::PathIo {
+            op: "create key directory",
+            path: parent.to_path_buf(),
+            source: e,
+        })?;
     }
 
     #[cfg(unix)]
@@ -55,15 +69,26 @@ fn save_key(path: &Path, key: &SecretKey) -> anyhow::Result<()> {
             .truncate(true)
             .mode(0o600)
             .open(path)
-            .with_context(|| format!("failed to open key file: {}", path.display()))?;
+            .map_err(|e| PersistError::PathIo {
+                op: "open key file",
+                path: path.to_path_buf(),
+                source: e,
+            })?;
         file.write_all(&key.to_bytes())
-            .with_context(|| format!("failed to write key file: {}", path.display()))?;
+            .map_err(|e| PersistError::PathIo {
+                op: "write key file",
+                path: path.to_path_buf(),
+                source: e,
+            })?;
     }
 
     #[cfg(not(unix))]
     {
-        std::fs::write(path, key.to_bytes())
-            .with_context(|| format!("failed to write key file: {}", path.display()))?;
+        std::fs::write(path, key.to_bytes()).map_err(|e| PersistError::PathIo {
+            op: "write key file",
+            path: path.to_path_buf(),
+            source: e,
+        })?;
     }
 
     Ok(())

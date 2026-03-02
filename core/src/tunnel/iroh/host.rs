@@ -22,20 +22,23 @@ pub(super) async fn host_accept_loop(
     mc_port: u16,
     tx: mpsc::Sender<TunnelEvent>,
     ctx: HostContext,
-) -> anyhow::Result<()> {
+) -> crate::Result<()> {
     loop {
         let conn = endpoint
             .accept()
             .await
-            .ok_or_else(|| anyhow::anyhow!("endpoint closed"))?
-            .await?;
+            .ok_or_else(|| {
+                crate::error::TunnelError::AcceptHostConnection("endpoint closed".into())
+            })?
+            .await
+            .map_err(|e| crate::error::TunnelError::AcceptHostConnection(e.to_string()))?;
 
         let remote_endpoint_id = conn.remote_id();
         let remote_id = remote_endpoint_id.fmt_short().to_string();
         tracing::info!(remote = %remote_id, "player connected");
 
         if !capacity_check_with_grace(ctx.sessions.clone(), remote_endpoint_id, ctx.max_players)
-            .await
+            .await?
         {
             tracing::info!(remote = %remote_id, "server full, rejecting");
             let _ = tx
@@ -75,7 +78,7 @@ pub(super) async fn host_accept_loop(
         }
 
         let (generation, is_reconnect, old_conn) = {
-            let mut guard = ctx.sessions.lock().unwrap();
+            let mut guard = super::lock_mutex(&ctx.sessions, "host sessions")?;
             guard.upsert(remote_endpoint_id, conn.clone())
         };
         if let Some(old_conn) = old_conn {
@@ -83,7 +86,7 @@ pub(super) async fn host_accept_loop(
         }
 
         let conn_info = conn.to_info();
-        ctx.conns.lock().unwrap().push(conn_info.clone());
+        super::lock_mutex(&ctx.conns, "host connections")?.push(conn_info.clone());
 
         if is_reconnect {
             tracing::info!(remote = %remote_id, "player reconnected");
@@ -105,10 +108,21 @@ pub(super) async fn host_accept_loop(
                 Some((err, _stats)) => err.to_string(),
                 None => "connection closed".to_string(),
             };
-            let should_emit_left = {
-                let mut guard = sessions_on_close.lock().unwrap();
-                guard.remove_if_current(&remote_endpoint_id, generation)
+            let mut lock_error = None;
+            let should_emit_left = match super::lock_mutex(&sessions_on_close, "host sessions") {
+                Ok(mut guard) => guard.remove_if_current(&remote_endpoint_id, generation),
+                Err(e) => {
+                    lock_error = Some(e);
+                    false
+                }
             };
+            if let Some(e) = lock_error {
+                let _ = tx_left
+                    .send(TunnelEvent::Error {
+                        message: e.to_string(),
+                    })
+                    .await;
+            }
             if should_emit_left {
                 let _ = tx_left
                     .send(TunnelEvent::PlayerLeft {
@@ -134,7 +148,7 @@ async fn capacity_check_with_grace(
     sessions: Arc<Mutex<HostSessions>>,
     incoming_id: EndpointId,
     max_players: Option<u32>,
-) -> bool {
+) -> crate::Result<bool> {
     capacity_check_with_grace_delay(sessions, incoming_id, max_players, FULL_RECHECK_DELAY).await
 }
 
@@ -143,9 +157,9 @@ async fn capacity_check_with_grace_delay(
     incoming_id: EndpointId,
     max_players: Option<u32>,
     recheck_delay: Duration,
-) -> bool {
+) -> crate::Result<bool> {
     let Some(max) = max_players else {
-        return true;
+        return Ok(true);
     };
 
     let has_capacity_or_reconnect = |guard: &HostSessions| {
@@ -153,16 +167,16 @@ async fn capacity_check_with_grace_delay(
     };
 
     {
-        let guard = sessions.lock().unwrap();
+        let guard = super::lock_mutex(&sessions, "host sessions")?;
         if has_capacity_or_reconnect(&guard) {
-            return true;
+            return Ok(true);
         }
     }
 
     tokio::time::sleep(recheck_delay).await;
 
-    let guard = sessions.lock().unwrap();
-    has_capacity_or_reconnect(&guard)
+    let guard = super::lock_mutex(&sessions, "host sessions")?;
+    Ok(has_capacity_or_reconnect(&guard))
 }
 
 /// 拒绝连接后异步 close 并等待收敛。
@@ -181,9 +195,12 @@ fn spawn_rejected_conn_cleanup(
 }
 
 /// 处理单个连接内的双向流转发。
-async fn host_handle_conn(conn: Connection, mc_port: u16) -> anyhow::Result<()> {
+async fn host_handle_conn(conn: Connection, mc_port: u16) -> crate::Result<()> {
     loop {
-        let (send, recv) = conn.accept_bi().await?;
+        let (send, recv) = conn
+            .accept_bi()
+            .await
+            .map_err(|e| crate::error::TunnelError::AcceptQuicBiStream(e.to_string()))?;
 
         tokio::spawn(async move {
             let tcp = match TcpStream::connect(("127.0.0.1", mc_port)).await {
@@ -207,17 +224,27 @@ mod tests {
 
     fn test_endpoint_id() -> EndpointId {
         let bytes: [u8; 32] = rand::random();
-        SecretKey::from_bytes(&bytes).public().into()
+        SecretKey::from_bytes(&bytes).public()
     }
 
     #[tokio::test]
     async fn capacity_allows_reconnect_when_full() {
         let endpoint_id = test_endpoint_id();
         let sessions = Arc::new(Mutex::new(HostSessions::default()));
-        sessions.lock().unwrap().insert_for_test(endpoint_id, 1);
+        {
+            let lock_res = sessions.lock();
+            assert!(lock_res.is_ok(), "host sessions lock poisoned");
+            if let Ok(mut guard) = lock_res {
+                guard.insert_for_test(endpoint_id, 1);
+            } else {
+                return;
+            }
+        }
 
-        let allowed =
+        let allowed_res =
             capacity_check_with_grace_delay(sessions, endpoint_id, Some(1), Duration::ZERO).await;
+        assert!(allowed_res.is_ok(), "capacity check failed");
+        let allowed = if let Ok(v) = allowed_res { v } else { return };
         assert!(allowed);
     }
 
@@ -226,10 +253,20 @@ mod tests {
         let existing = test_endpoint_id();
         let incoming = test_endpoint_id();
         let sessions = Arc::new(Mutex::new(HostSessions::default()));
-        sessions.lock().unwrap().insert_for_test(existing, 1);
+        {
+            let lock_res = sessions.lock();
+            assert!(lock_res.is_ok(), "host sessions lock poisoned");
+            if let Ok(mut guard) = lock_res {
+                guard.insert_for_test(existing, 1);
+            } else {
+                return;
+            }
+        }
 
-        let allowed =
+        let allowed_res =
             capacity_check_with_grace_delay(sessions, incoming, Some(1), Duration::ZERO).await;
+        assert!(allowed_res.is_ok(), "capacity check failed");
+        let allowed = if let Ok(v) = allowed_res { v } else { return };
         assert!(!allowed);
     }
 }
