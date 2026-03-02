@@ -47,7 +47,7 @@ pub fn spawn_join(
     password: Option<String>,
     tx: mpsc::UnboundedSender<AppEvent>,
 ) -> JoinHandle<()> {
-    let ticket_str = ticket_str.trim().trim_matches('"').to_owned();
+    let ticket_str = ticket_str.trim().to_owned();
     tokio::spawn(async move {
         let ticket: Ticket = match ticket_str.parse() {
             Ok(t) => t,

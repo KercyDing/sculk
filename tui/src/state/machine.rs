@@ -52,7 +52,7 @@ pub(crate) fn handle_lifecycle_esc(state: &mut AppState) -> Step {
         TunnelPhase::Idle => {
             let now = Instant::now();
             if let Some(prev) = state.quit_pressed_at
-                && now.duration_since(prev).as_secs() < 3
+                && now.duration_since(prev).as_secs() < 1
             {
                 return Step::Exit;
             }

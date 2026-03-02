@@ -21,8 +21,7 @@ pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
             state.quit_pressed_at = None;
             state.ctx.tunnel = Some(tunnel);
 
-            let quoted = format!("\"{ticket}\"");
-            if persist::clipboard_copy(&quoted) {
+            if persist::clipboard_copy(&ticket) {
                 state.add_log("票据已复制到剪贴板");
             }
             state.ticket = Some(ticket);
@@ -110,7 +109,7 @@ pub(crate) fn on_tick(state: &mut AppState) {
     state.tick = state.tick.saturating_add(1);
 
     if let Some(prev) = state.quit_pressed_at
-        && Instant::now().duration_since(prev).as_secs() >= 3
+        && Instant::now().duration_since(prev).as_secs() >= 1
     {
         state.quit_pressed_at = None;
     }
