@@ -6,50 +6,28 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::theme::{ACCENT, ERROR, INFO, PANEL};
-use crate::state::{AppState, InputMode};
+use crate::state::{AppState, FooterSpec, FooterTone};
 
 pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
-    if state.input_mode == InputMode::Editing {
-        let footer = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "编辑模式",
-                Style::default().fg(INFO).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled("Esc", Style::default().fg(ACCENT)),
-            Span::raw(" 退出编辑  "),
-            Span::styled("Tab", Style::default().fg(ACCENT)),
-            Span::raw(" 下个字段  "),
-        ]))
-        .alignment(Alignment::Left)
-        .style(Style::default().bg(PANEL));
-        frame.render_widget(footer, area);
-        return;
+    let spec = state.footer_spec();
+
+    let mut spans = Vec::new();
+    for item in &spec.left {
+        spans.push(Span::styled(item.key.as_ref(), key_style(item.tone)));
+        if !item.label.is_empty() {
+            spans.push(Span::raw(format!(" {}", item.label)));
+        }
+        spans.push(Span::raw("  "));
     }
 
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled("Enter", Style::default().fg(ACCENT)),
-        Span::raw(" 执行  "),
-        Span::styled("i", Style::default().fg(ACCENT)),
-        Span::raw(" 编辑  "),
-        Span::styled("←/→", Style::default().fg(ACCENT)),
-        Span::raw(" 模式  "),
-        Span::styled("Tab", Style::default().fg(ACCENT)),
-        Span::raw(" 焦点  "),
-        Span::styled("↑/↓", Style::default().fg(ACCENT)),
-        Span::raw(" 字段  "),
-        Span::styled("h", Style::default().fg(ACCENT)),
-        Span::raw(" 帮助  "),
-        Span::styled("Esc", Style::default().fg(ERROR)),
-        Span::raw(format!(" {}", state.esc_action_label())),
-    ]))
-    .alignment(Alignment::Left)
-    .style(Style::default().bg(PANEL));
+    let footer = Paragraph::new(Line::from(spans))
+        .alignment(Alignment::Left)
+        .style(Style::default().bg(PANEL));
     frame.render_widget(footer, area);
 
-    if state.esc_can_exit() && state.quit_pressed_at.is_some() {
+    if let Some(hint) = spec.right_hint {
         let hint = Paragraph::new(Line::from(vec![Span::styled(
-            "再次按 Esc 退出",
+            hint,
             Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
         )]))
         .alignment(Alignment::Right)
@@ -57,3 +35,14 @@ pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
         frame.render_widget(hint, area);
     }
 }
+
+fn key_style(tone: FooterTone) -> Style {
+    match tone {
+        FooterTone::Accent => Style::default().fg(ACCENT),
+        FooterTone::Info => Style::default().fg(INFO).add_modifier(Modifier::BOLD),
+        FooterTone::Error => Style::default().fg(ERROR),
+    }
+}
+
+#[allow(dead_code)]
+fn _assert_footer_spec_used(_spec: &FooterSpec) {}

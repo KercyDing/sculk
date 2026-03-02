@@ -29,4 +29,6 @@ jobs:
 
       - run: cargo clippy --workspace -- -D warnings
 
+      - run: cargo clippy -p sculk-tui --no-deps -- -D warnings -W clippy::unwrap_used -W clippy::expect_used -W clippy::panic
+
       - run: cargo test --workspace --features sculk/ci
