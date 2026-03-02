@@ -15,7 +15,6 @@ version.workspace = true
 
 [features]
 default = []
-ci = []
 clipboard = ["dep:arboard"]
 persist = ["dep:dirs", "dep:rand", "dep:serde", "dep:toml"]
 

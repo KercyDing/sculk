@@ -67,7 +67,7 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     }
 
     let help = Paragraph::new(Text::from(lines));
-    frame.render_widget(help, popup.inner(Margin::new(1, 1)));
+    frame.render_widget(help, popup.inner(Margin::new(3, 1)));
 }
 
 /// 中止隧道确认弹窗。
@@ -101,7 +101,7 @@ pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, sta
         .border_style(Style::default().fg(WARN));
     frame.render_widget(block, popup);
 
-    let inner = popup.inner(Margin::new(2, 1));
+    let inner = popup.inner(Margin::new(3, 1));
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -184,7 +184,7 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         .border_style(Style::default().fg(ACCENT));
     frame.render_widget(block, popup);
 
-    let inner = popup.inner(Margin::new(2, 1));
+    let inner = popup.inner(Margin::new(3, 1));
 
     let mut constraints = vec![Constraint::Length(1)];
     for _ in &spec.fields {

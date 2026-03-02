@@ -32,16 +32,9 @@ check:
     cargo check --workspace
     cargo clippy --workspace --all-targets --all-features
 
-# 离线测试
+# 测试
 test:
-    cargo nextest run --workspace --features sculk/ci --no-tests=pass
-
-# 网络集成测试
-test-e2e:
-    cargo nextest run -p sculk --test p2p_test --no-tests=pass
-
-# 全量测试
-test-all: test test-e2e
+    cargo nextest run --workspace --no-tests=pass
 
 # 格式化
 fmt:
