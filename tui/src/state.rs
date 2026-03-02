@@ -467,11 +467,7 @@ impl AppState {
                 if sculk::clipboard::clipboard_copy(&quoted) {
                     self.add_log("票据已复制到剪贴板");
                 }
-                self.ticket = Some(ticket.clone());
-
-                // 持久化票据供下次加入方快速粘贴
-                self.profile.join.last_ticket = Some(ticket);
-                let _ = self.profile.save();
+                self.ticket = Some(ticket);
 
                 self.add_log("host 隧道已启动");
 
@@ -481,6 +477,10 @@ impl AppState {
                 self.phase = TunnelPhase::Active;
                 self.tunnel = Some(tunnel);
                 self.add_log("已成功连入隧道");
+
+                // 持久化本次使用的票据，下次打开直接回填
+                self.profile.join.last_ticket = Some(self.join_ticket.value.clone());
+                let _ = self.profile.save();
 
                 tunnel::spawn_event_forwarder(events, self.app_tx.clone());
             }
