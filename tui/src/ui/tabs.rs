@@ -5,25 +5,22 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Tabs};
 
-use super::theme::{ACCENT, INFO, LEFT_PANEL_BG, WARN, border_style};
+use super::theme::{ACCENT, BG, INFO, WARN, border_style};
 use crate::state::{AppState, PanelSpec};
 
 pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
-    frame.render_widget(
-        Block::default().style(Style::default().bg(LEFT_PANEL_BG)),
-        area,
-    );
+    frame.render_widget(Block::default().style(Style::default().bg(BG)), area);
 
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(8)]).split(area);
     let spec = state.tabs_spec();
 
     let tabs = Tabs::new(*spec.titles)
         .select(spec.selected_tab)
-        .style(Style::default().fg(Color::Gray).bg(LEFT_PANEL_BG))
+        .style(Style::default().fg(Color::Gray).bg(BG))
         .highlight_style(
             Style::default()
                 .fg(ACCENT)
-                .bg(LEFT_PANEL_BG)
+                .bg(BG)
                 .add_modifier(Modifier::BOLD),
         )
         .divider(" • ")
@@ -33,7 +30,7 @@ pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppSt
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(border_style(spec.profile_focused))
-                .style(Style::default().bg(LEFT_PANEL_BG)),
+                .style(Style::default().bg(BG)),
         );
     frame.render_widget(tabs, sections[0]);
 
@@ -42,7 +39,7 @@ pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppSt
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style(spec.profile_focused))
-        .style(Style::default().bg(LEFT_PANEL_BG));
+        .style(Style::default().bg(BG));
     let inner = panel_block.inner(sections[1]);
     frame.render_widget(panel_block, sections[1]);
 
@@ -76,15 +73,12 @@ fn render_host_fields(
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(
-                "角色: ",
-                Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
-            ),
+            Span::styled("角色: ", Style::default().fg(Color::DarkGray).bg(BG)),
             Span::styled(
                 "建房",
                 Style::default()
                     .fg(ACCENT)
-                    .bg(LEFT_PANEL_BG)
+                    .bg(BG)
                     .add_modifier(Modifier::BOLD),
             ),
         ])),
@@ -101,7 +95,7 @@ fn render_host_fields(
     frame.render_widget(
         Paragraph::new(Span::styled(
             hint,
-            Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+            Style::default().fg(Color::DarkGray).bg(BG),
         )),
         rows[5],
     );
@@ -127,15 +121,12 @@ fn render_join_fields(
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(
-                "角色: ",
-                Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
-            ),
+            Span::styled("角色: ", Style::default().fg(Color::DarkGray).bg(BG)),
             Span::styled(
                 "加入",
                 Style::default()
                     .fg(INFO)
-                    .bg(LEFT_PANEL_BG)
+                    .bg(BG)
                     .add_modifier(Modifier::BOLD),
             ),
         ])),
@@ -155,7 +146,7 @@ fn render_join_fields(
     frame.render_widget(
         Paragraph::new(Span::styled(
             hint,
-            Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+            Style::default().fg(Color::DarkGray).bg(BG),
         )),
         rows[6],
     );
@@ -182,15 +173,12 @@ fn render_relay_fields(
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(
-                "角色: ",
-                Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
-            ),
+            Span::styled("角色: ", Style::default().fg(Color::DarkGray).bg(BG)),
             Span::styled(
                 "中继",
                 Style::default()
                     .fg(Color::Magenta)
-                    .bg(LEFT_PANEL_BG)
+                    .bg(BG)
                     .add_modifier(Modifier::BOLD),
             ),
         ])),
@@ -202,11 +190,11 @@ fn render_relay_fields(
         let suffix = if option.applied { " (已应用)" } else { "" };
 
         let style = if option.selected {
-            Style::default().fg(ACCENT).bg(LEFT_PANEL_BG)
+            Style::default().fg(ACCENT).bg(BG)
         } else if option.applied {
-            Style::default().fg(Color::White).bg(LEFT_PANEL_BG)
+            Style::default().fg(Color::White).bg(BG)
         } else {
-            Style::default().fg(Color::Gray).bg(LEFT_PANEL_BG)
+            Style::default().fg(Color::Gray).bg(BG)
         };
 
         frame.render_widget(
@@ -225,7 +213,7 @@ fn render_relay_fields(
     frame.render_widget(
         Paragraph::new(Span::styled(
             hint,
-            Style::default().fg(Color::DarkGray).bg(LEFT_PANEL_BG),
+            Style::default().fg(Color::DarkGray).bg(BG),
         )),
         rows[6],
     );
@@ -243,9 +231,9 @@ fn render_field_line(
         Layout::horizontal([Constraint::Length(label_width), Constraint::Min(4)]).split(area);
 
     let label_style = if selected {
-        Style::default().fg(ACCENT).bg(LEFT_PANEL_BG)
+        Style::default().fg(ACCENT).bg(BG)
     } else {
-        Style::default().fg(WARN).bg(LEFT_PANEL_BG)
+        Style::default().fg(WARN).bg(BG)
     };
 
     let marker = if selected { "▶ " } else { "  " };
@@ -269,9 +257,9 @@ fn render_field_line(
     };
 
     let value_style = if selected {
-        Style::default().fg(Color::White).bg(LEFT_PANEL_BG)
+        Style::default().fg(Color::White).bg(BG)
     } else {
-        Style::default().fg(Color::Gray).bg(LEFT_PANEL_BG)
+        Style::default().fg(Color::Gray).bg(BG)
     };
     frame.render_widget(Paragraph::new(Span::styled(display, value_style)), cols[1]);
 }

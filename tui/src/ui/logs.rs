@@ -6,7 +6,7 @@ use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Borders, Gauge, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::theme::{ACCENT, PANEL, border_style};
+use super::theme::{ACCENT, BG, border_style};
 use crate::state::AppState;
 
 pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
@@ -18,7 +18,7 @@ pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppS
                 .title("链路质量")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .style(Style::default().bg(PANEL))
+                .style(Style::default().bg(BG))
                 .border_style(border_style(false)),
         )
         .gauge_style(Style::default().fg(ACCENT).bg(Color::Rgb(12, 40, 30)))
@@ -31,7 +31,7 @@ pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppS
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style(base_spec.focus_logs))
-        .style(Style::default().bg(PANEL));
+        .style(Style::default().bg(BG));
     let inner = block.inner(sections[1]);
     frame.render_widget(block, sections[1]);
 

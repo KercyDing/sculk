@@ -26,8 +26,19 @@ fn slice_by_width(s: &str, start: usize, max_width: usize) -> (usize, usize) {
     (end, width)
 }
 
-use super::theme::{ACCENT, INFO, PANEL_ALT, WARN};
+use super::theme::{ACCENT, BG, INFO, WARN};
 use crate::state::{AppState, HelpLineSpec};
+
+/// 清空弹窗区域，左右各多清 1 列以断开跨边界的 CJK 双宽字符。
+fn clear_popup(frame: &mut ratatui::Frame<'_>, popup: Rect) {
+    let total_w = frame.area().width;
+    let x = popup.x.saturating_sub(1);
+    let w = (popup.width + 2).min(total_w.saturating_sub(x));
+    let expanded = Rect::new(x, popup.y, w, popup.height);
+    frame.render_widget(Clear, expanded);
+    // 用主背景色填充扩展区域，使多清的列与周围 UI 融合
+    frame.render_widget(Block::default().style(Style::default().bg(BG)), expanded);
+}
 
 pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
     let spec = state.help_popup_spec();
@@ -35,14 +46,14 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         return;
     }
 
-    let popup = centered_rect(64, 52, area);
-    frame.render_widget(Clear, popup);
+    let popup = centered_rect_abs(50, 20, area);
+    clear_popup(frame, popup);
 
     let block = Block::default()
         .title("帮助")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .style(Style::default().bg(PANEL_ALT))
+        .style(Style::default().bg(BG))
         .border_style(Style::default().fg(INFO));
     frame.render_widget(block, popup);
 
@@ -67,7 +78,7 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     }
 
     let help = Paragraph::new(Text::from(lines));
-    frame.render_widget(help, popup.inner(Margin::new(3, 1)));
+    frame.render_widget(help, popup.inner(Margin::new(2, 1)));
 }
 
 /// 中止隧道确认弹窗。
@@ -91,17 +102,17 @@ pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, sta
     ])
     .split(popup[1])[1];
 
-    frame.render_widget(Clear, popup);
+    clear_popup(frame, popup);
 
     let block = Block::default()
         .title(" 中止隧道 ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .style(Style::default().bg(PANEL_ALT))
+        .style(Style::default().bg(BG))
         .border_style(Style::default().fg(WARN));
     frame.render_widget(block, popup);
 
-    let inner = popup.inner(Margin::new(3, 1));
+    let inner = popup.inner(Margin::new(2, 1));
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -132,22 +143,14 @@ pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, sta
 }
 
 /// 在给定区域内生成居中矩形。
-pub fn centered_rect(width_percent: u16, height_percent: u16, area: Rect) -> Rect {
-    let h = height_percent.min(100);
-    let w = width_percent.min(100);
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - h) / 2),
-        Constraint::Percentage(h),
-        Constraint::Percentage((100 - h) / 2),
-    ])
-    .split(area);
-
-    Layout::horizontal([
-        Constraint::Percentage((100 - w) / 2),
-        Constraint::Percentage(w),
-        Constraint::Percentage((100 - w) / 2),
-    ])
-    .split(vertical[1])[1]
+pub fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
+    let clamped_w = width.min(area.width);
+    // 强制偶数宽度
+    let w = clamped_w & !1;
+    let h = height.min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    Rect::new(x, y, w, h)
 }
 
 /// 编辑弹窗。
@@ -174,17 +177,17 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     .split(vert[1]);
 
     let popup = horiz[1];
-    frame.render_widget(Clear, popup);
+    clear_popup(frame, popup);
 
     let block = Block::default()
         .title(spec.title)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .style(Style::default().bg(PANEL_ALT))
+        .style(Style::default().bg(BG))
         .border_style(Style::default().fg(ACCENT));
     frame.render_widget(block, popup);
 
-    let inner = popup.inner(Margin::new(3, 1));
+    let inner = popup.inner(Margin::new(2, 1));
 
     let mut constraints = vec![Constraint::Length(1)];
     for _ in &spec.fields {

@@ -5,7 +5,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::theme::{ACCENT, ERROR, INFO, PANEL};
+use super::theme::{ACCENT, BG, ERROR, INFO};
 use crate::state::{AppState, FooterSpec, FooterTone};
 
 pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
@@ -22,7 +22,7 @@ pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
 
     let footer = Paragraph::new(Line::from(spans))
         .alignment(Alignment::Left)
-        .style(Style::default().bg(PANEL));
+        .style(Style::default().bg(BG));
     frame.render_widget(footer, area);
 
     if let Some(hint) = spec.right_hint {
@@ -31,7 +31,7 @@ pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppStat
             Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
         )]))
         .alignment(Alignment::Right)
-        .style(Style::default().bg(PANEL));
+        .style(Style::default().bg(BG));
         frame.render_widget(hint, area);
     }
 }

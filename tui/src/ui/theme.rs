@@ -2,10 +2,7 @@
 
 use ratatui::style::{Color, Style};
 
-pub const BG: Color = Color::Rgb(12, 15, 26);
-pub const LEFT_PANEL_BG: Color = Color::Rgb(4, 18, 28);
-pub const PANEL: Color = LEFT_PANEL_BG;
-pub const PANEL_ALT: Color = LEFT_PANEL_BG;
+pub const BG: Color = Color::Rgb(4, 18, 28);
 pub const ACCENT: Color = Color::Rgb(74, 222, 128);
 pub const INFO: Color = Color::Rgb(59, 130, 246);
 pub const WARN: Color = Color::Rgb(245, 158, 11);
