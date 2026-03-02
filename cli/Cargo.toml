@@ -1,10 +1,20 @@
 [package]
 name = "sculk-cli"
-version = "0.1.0"
-edition = "2024"
+categories = ["network-programming", "command-line-utilities"]
+description = "Minecraft P2P multiplayer tunnel CLI"
+documentation = "https://docs.rs/sculk-cli"
+include = ["/src/**", "/Cargo.toml", "/README.md"]
+keywords = ["minecraft", "p2p", "tunnel", "cli"]
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-sculk-core = { workspace = true, features = ["persist", "clipboard"] }
+sculk = { workspace = true, features = ["persist", "clipboard"] }
 anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true

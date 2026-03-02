@@ -31,6 +31,11 @@ foreach ($component in $components) {
     } else {
         Write-Host "警告：在 $path 未找到 $component" -ForegroundColor Yellow
     }
+    $cargoPath = Join-Path "$env:USERPROFILE\.cargo\bin" "$component.exe"
+    if (Test-Path $cargoPath) {
+        $pkgName = if ($component -eq "sculk") { "sculk-cli" } else { "sculk-tui" }
+        Write-Host "检测到 $cargoPath，由 cargo install 安装，请手动执行：cargo uninstall $pkgName" -ForegroundColor Yellow
+    }
 }
 
 if (Test-Path $INSTALL_DIR) {

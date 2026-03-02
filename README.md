@@ -1,9 +1,13 @@
 # sculk
 
+[![crates.io](https://img.shields.io/crates/v/sculk.svg)](https://crates.io/crates/sculk)
+[![docs.rs](https://docs.rs/sculk/badge.svg)](https://docs.rs/sculk)
+[![license](https://img.shields.io/crates/l/sculk.svg)](LICENSE)
+
 一个面向 Minecraft 联机的 P2P 隧道项目，基于 iroh/QUIC，提供：
 - `sculk`：命令行客户端（CLI）
 - `sculk-tui`：终端图形客户端（TUI）
-- `sculk-core`：可复用隧道核心库
+- `sculk`：可复用隧道核心库
 
 > Sculk（幽匿）是 Minecraft 深暗之域中悄然蔓延的脉络，无声地在节点间传递信号。
 > 
@@ -13,7 +17,7 @@
 
 这是一个 Rust workspace：
 
-- `core` (`sculk-core`)：隧道能力与票据协议
+- `core` (`sculk`)：隧道能力与票据协议
   - `IrohTunnel::host/join`
   - `Ticket`（`sculk://...`）
   - `TunnelConfig` / `TunnelEvent`
@@ -42,13 +46,13 @@
 #### macOS / Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.sh | sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.sh)"
 ```
 
 #### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.ps1 | iex
+& $([scriptblock]::Create((irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.ps1)))
 ```
 
 脚本会交互式询问安装：
@@ -56,11 +60,21 @@ irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/insta
 2. `sculk-tui`
 3. 全部
 
-### 方式二：从源码安装
+### 方式二：从 crates.io 安装
+
+```sh
+cargo install sculk-cli
+cargo install sculk-tui
+```
+
+### 方式三：从源码安装
 
 ```sh
 cargo install --path cli
 cargo install --path tui
+
+# 或使用 just
+just install-all
 ```
 
 ## 卸载
@@ -70,13 +84,13 @@ cargo install --path tui
 #### macOS / Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.sh | sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.sh)"
 ```
 
 #### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.ps1 | iex
+& $([scriptblock]::Create((irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.ps1)))
 ```
 
 ### Cargo 卸载（注意包名）

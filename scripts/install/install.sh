@@ -102,15 +102,52 @@ download_binary() {
 }
 
 echo "正在安装组件：$install_list"
+
+# 检测 cargo install 冲突
+check_cargo_conflict() {
+    cargo_path="$HOME/.cargo/bin/$1"
+    if [ -f "$cargo_path" ]; then
+        pkg_name=$([ "$1" = "sculk" ] && echo "sculk-cli" || echo "sculk-tui")
+        echo "警告：检测到 $cargo_path，建议先执行 cargo uninstall $pkg_name 避免冲突。"
+        printf "是否继续安装？[y/N] "
+        read answer
+        case "$answer" in
+            [yY]*)
+                printf "是否删除 $cargo_path？[y/N] "
+                read del_answer
+                case "$del_answer" in
+                    [yY]*) rm -f "$cargo_path"; echo "已删除 $cargo_path" ;;
+                esac
+                ;;
+            *) echo "已跳过 $1"; return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+installed=0
+
 if [ "$install_sculk" -eq 1 ]; then
-    download_binary "sculk-$SUFFIX" "sculk"
+    if check_cargo_conflict "sculk"; then
+        download_binary "sculk-$SUFFIX" "sculk"
+        installed=1
+    fi
 fi
 if [ "$install_tui" -eq 1 ]; then
-    download_binary "sculk-tui-$SUFFIX" "sculk-tui"
+    if check_cargo_conflict "sculk-tui"; then
+        download_binary "sculk-tui-$SUFFIX" "sculk-tui"
+        installed=1
+    fi
+fi
+
+if [ "$installed" -eq 0 ]; then
+    echo ""
+    echo "未安装任何组件。"
+    exit 0
 fi
 
 # 检查安装目录是否在 PATH 中
-SHELL_RC="$HOME/.profile"
+SHELL_RC=""
 case ":$PATH:" in
     *":$INSTALL_DIR:"*)
         ;;
@@ -140,15 +177,11 @@ echo ""
 if [ "$install_sculk" -eq 1 ]; then
     if command -v sculk >/dev/null 2>&1; then
         echo "验证 (sculk): $(sculk --version)"
-    else
-        echo "sculk 已安装，但当前 PATH 中未找到命令。"
     fi
 fi
 if [ "$install_tui" -eq 1 ]; then
     if command -v sculk-tui >/dev/null 2>&1; then
-        echo "验证 (sculk-tui): $(sculk-tui --version)"
-    else
-        echo "sculk-tui 已安装，但当前 PATH 中未找到命令。"
+        echo "验证 (sculk-tui): 已安装到 $(command -v sculk-tui)"
     fi
 fi
 

@@ -1,7 +1,17 @@
 [package]
-name = "sculk-core"
-version = "0.1.0"
-edition = "2024"
+name = "sculk"
+categories = ["network-programming", "game-development"]
+description = "P2P tunnel core library for Minecraft multiplayer"
+documentation = "https://docs.rs/sculk"
+include = ["/src/**", "/Cargo.toml", "/README.md"]
+keywords = ["minecraft", "p2p", "tunnel", "quic", "iroh"]
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [features]
 default = []

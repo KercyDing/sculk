@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sculk_core::tunnel::{IrohTunnel, Ticket, TunnelConfig, TunnelEvent};
+use sculk::tunnel::{IrohTunnel, Ticket, TunnelConfig, TunnelEvent};
 use tokio::sync::mpsc;
 
 /// TUI 内部事件。
@@ -30,8 +30,8 @@ pub enum AppEvent {
 /// 异步启动 host 隧道。
 pub fn spawn_host(
     port: u16,
-    secret_key: sculk_core::tunnel::SecretKey,
-    relay_url: Option<sculk_core::tunnel::RelayUrl>,
+    secret_key: sculk::tunnel::SecretKey,
+    relay_url: Option<sculk::tunnel::RelayUrl>,
     password: Option<String>,
     tx: mpsc::UnboundedSender<AppEvent>,
 ) {

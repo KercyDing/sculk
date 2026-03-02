@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use sculk_core::tunnel::{TunnelConfig, TunnelEvent};
+use sculk::tunnel::{TunnelConfig, TunnelEvent};
 
 /// 启动一个简单的 TCP echo server，收到什么就回什么
 async fn echo_server(listener: TcpListener) {
@@ -73,7 +73,7 @@ async fn tunnel_echo_roundtrip() {
 
     // 2. Host: 创建隧道
     let (host_tunnel, ticket, mut host_events) =
-        sculk_core::tunnel::IrohTunnel::host(mc_port, None, None, TunnelConfig::default())
+        sculk::tunnel::IrohTunnel::host(mc_port, None, None, TunnelConfig::default())
             .await
             .unwrap();
 
@@ -81,7 +81,7 @@ async fn tunnel_echo_roundtrip() {
     let local_port = alloc_port().await;
 
     let (join_tunnel, mut join_events) =
-        sculk_core::tunnel::IrohTunnel::join(&ticket, local_port, TunnelConfig::default())
+        sculk::tunnel::IrohTunnel::join(&ticket, local_port, TunnelConfig::default())
             .await
             .unwrap();
 
@@ -130,13 +130,13 @@ async fn tunnel_password_correct() {
     };
 
     let (host_tunnel, ticket, mut host_events) =
-        sculk_core::tunnel::IrohTunnel::host(mc_port, None, None, config.clone())
+        sculk::tunnel::IrohTunnel::host(mc_port, None, None, config.clone())
             .await
             .unwrap();
 
     let local_port = alloc_port().await;
     let (join_tunnel, mut join_events) =
-        sculk_core::tunnel::IrohTunnel::join(&ticket, local_port, config)
+        sculk::tunnel::IrohTunnel::join(&ticket, local_port, config)
             .await
             .unwrap();
 
@@ -164,7 +164,7 @@ async fn tunnel_password_wrong() {
     };
 
     let (host_tunnel, ticket, mut host_events) =
-        sculk_core::tunnel::IrohTunnel::host(mc_port, None, None, host_config)
+        sculk::tunnel::IrohTunnel::host(mc_port, None, None, host_config)
             .await
             .unwrap();
 
@@ -176,7 +176,7 @@ async fn tunnel_password_wrong() {
     };
 
     // join 应该返回 Err（密码错误）
-    let err = sculk_core::tunnel::IrohTunnel::join(&ticket, local_port, join_config)
+    let err = sculk::tunnel::IrohTunnel::join(&ticket, local_port, join_config)
         .await
         .err()
         .expect("join with wrong password should fail");
@@ -212,7 +212,7 @@ async fn tunnel_max_players() {
     };
 
     let (host_tunnel, ticket, mut host_events) =
-        sculk_core::tunnel::IrohTunnel::host(mc_port, None, None, host_config)
+        sculk::tunnel::IrohTunnel::host(mc_port, None, None, host_config)
             .await
             .unwrap();
 
@@ -223,7 +223,7 @@ async fn tunnel_max_players() {
         ..Default::default()
     };
     let (join1, mut join1_events) =
-        sculk_core::tunnel::IrohTunnel::join(&ticket, local_port1, join_config.clone())
+        sculk::tunnel::IrohTunnel::join(&ticket, local_port1, join_config.clone())
             .await
             .unwrap();
 
@@ -236,7 +236,7 @@ async fn tunnel_max_players() {
     // 第二个 join 应该连接后被关闭
     let local_port2 = alloc_port().await;
     let (join2, mut join2_events) =
-        sculk_core::tunnel::IrohTunnel::join(&ticket, local_port2, join_config)
+        sculk::tunnel::IrohTunnel::join(&ticket, local_port2, join_config)
             .await
             .unwrap();
 
@@ -273,13 +273,13 @@ async fn tunnel_no_password_compat() {
     };
 
     let (host_tunnel, ticket, mut host_events) =
-        sculk_core::tunnel::IrohTunnel::host(mc_port, None, None, config.clone())
+        sculk::tunnel::IrohTunnel::host(mc_port, None, None, config.clone())
             .await
             .unwrap();
 
     let local_port = alloc_port().await;
     let (join_tunnel, mut join_events) =
-        sculk_core::tunnel::IrohTunnel::join(&ticket, local_port, config)
+        sculk::tunnel::IrohTunnel::join(&ticket, local_port, config)
             .await
             .unwrap();
 

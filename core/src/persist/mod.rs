@@ -1,6 +1,6 @@
 //! 应用数据持久化：iroh 密钥管理与用户偏好 TOML Profile。
 //!
-//! 需在 `sculk-core` 中启用 `persist` feature（默认关闭）。
+//! 需在 `sculk` 中启用 `persist` feature（默认关闭）。
 //! 数据目录为 `{dirs::data_dir()}/sculk/`：
 //! - macOS：`~/Library/Application Support/sculk/`
 //! - Linux：`~/.local/share/sculk/`

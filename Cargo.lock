@@ -2359,9 +2359,9 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.12.13"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac832c50ced444ef6be0767a008b02c106a909ba79d1d830501e94b96f6b7e"
+checksum = "85f8024e1c8e71c778968af91d43700ce1d11b219d127d79fb2934153b82b42b"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-epoch",
@@ -3704,19 +3704,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
-name = "sculk-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "sculk-core",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "sculk-core"
+name = "sculk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3732,6 +3720,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sculk-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "sculk",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sculk-tui"
 version = "0.1.0"
 dependencies = [
@@ -3739,7 +3739,7 @@ dependencies = [
  "crossterm",
  "futures",
  "ratatui",
- "sculk-core",
+ "sculk",
  "tokio",
  "tracing",
  "tracing-subscriber",

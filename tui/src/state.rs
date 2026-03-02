@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
-use sculk_core::tunnel::{IrohTunnel, TunnelEvent};
+use sculk::tunnel::{IrohTunnel, TunnelEvent};
 use tokio::sync::mpsc;
 
 use crate::input::InputField;
@@ -88,10 +88,10 @@ pub struct AppState {
     pub app_tx: mpsc::UnboundedSender<AppEvent>,
 
     // 持久化配置
-    profile: sculk_core::persist::Profile,
+    profile: sculk::persist::Profile,
 
     // 连接快照
-    pub connections: Vec<sculk_core::tunnel::ConnectionSnapshot>,
+    pub connections: Vec<sculk::tunnel::ConnectionSnapshot>,
 
     // Host tab 输入字段
     pub host_port: InputField,
@@ -111,7 +111,7 @@ pub struct AppState {
 impl AppState {
     /// 从持久化 Profile 初始化状态，加载失败时回退到默认值。
     pub fn new(app_tx: mpsc::UnboundedSender<AppEvent>) -> Self {
-        let (profile, profile_err) = match sculk_core::persist::Profile::load() {
+        let (profile, profile_err) = match sculk::persist::Profile::load() {
             Ok(p) => (p, None),
             Err(e) => (Default::default(), Some(format!("配置加载失败: {e}"))),
         };
@@ -324,8 +324,8 @@ impl AppState {
                     Some(self.host_password.value.clone())
                 };
 
-                let key_path = sculk_core::persist::default_key_path();
-                let secret_key = match sculk_core::persist::load_or_generate_key(&key_path) {
+                let key_path = sculk::persist::default_key_path();
+                let secret_key = match sculk::persist::load_or_generate_key(&key_path) {
                     Ok(k) => k,
                     Err(e) => {
                         self.add_log(&format!("密钥加载失败: {e}"));
@@ -464,7 +464,7 @@ impl AppState {
                 self.tunnel = Some(tunnel);
 
                 let quoted = format!("\"{ticket}\"");
-                if sculk_core::clipboard::clipboard_copy(&quoted) {
+                if sculk::clipboard::clipboard_copy(&quoted) {
                     self.add_log("票据已复制到剪贴板");
                 }
                 self.ticket = Some(ticket.clone());

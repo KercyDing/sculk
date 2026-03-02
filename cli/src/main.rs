@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand};
-use sculk_core::persist::{self, Profile};
-use sculk_core::tunnel::{IrohTunnel, TunnelConfig, TunnelEvent};
+use sculk::persist::{self, Profile};
+use sculk::tunnel::{IrohTunnel, TunnelConfig, TunnelEvent};
 use tracing_subscriber::EnvFilter;
 
 const CLAP_STYLES: clap::builder::styling::Styles = clap::builder::styling::Styles::styled()
@@ -41,7 +41,7 @@ enum Commands {
     /// 作为房主启动并暴露本地 MC 服务端
     Host {
         /// 本地 Minecraft 服务端端口
-        #[arg(short, long, default_value_t = sculk_core::DEFAULT_MC_PORT)]
+        #[arg(short, long, default_value_t = sculk::DEFAULT_MC_PORT)]
         port: u16,
         /// 强制重新生成新密钥
         #[arg(long)]
@@ -67,7 +67,7 @@ enum Commands {
         /// 房主提供的 ticket
         ticket: String,
         /// 本地给 MC 客户端连接的端口
-        #[arg(short, long, default_value_t = sculk_core::DEFAULT_INLET_PORT)]
+        #[arg(short, long, default_value_t = sculk::DEFAULT_INLET_PORT)]
         port: u16,
         /// 路径状态打印间隔（秒，默认 0: 仅变化时输出）
         #[arg(short, long, default_value_t = 0)]
@@ -138,7 +138,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             let quoted = format!("\"{ticket_str}\"");
             println!("Ticket: {quoted}");
 
-            if sculk_core::clipboard::clipboard_copy(&quoted) {
+            if sculk::clipboard::clipboard_copy(&quoted) {
                 println!("(Copied to clipboard)");
             }
 
@@ -166,7 +166,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             password,
             max_retries,
         } => {
-            let ticket: sculk_core::tunnel::Ticket =
+            let ticket: sculk::tunnel::Ticket =
                 ticket.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
             if let Some(ref url) = ticket.relay_url {
                 println!("Relay: {url}");
@@ -274,7 +274,7 @@ mod tests {
     fn parse_join_defaults() {
         let cli = Cli::try_parse_from(["sculk", "join", "ticket"]).expect("parse join");
         assert!(
-            matches!(cli.command, Commands::Join { port, .. } if port == sculk_core::DEFAULT_INLET_PORT)
+            matches!(cli.command, Commands::Join { port, .. } if port == sculk::DEFAULT_INLET_PORT)
         );
     }
 }

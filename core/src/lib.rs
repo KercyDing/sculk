@@ -1,4 +1,4 @@
-//! sculk-core：面向 Minecraft 联机的 P2P 隧道库。
+//! sculk：面向 Minecraft 联机的 P2P 隧道库。
 //!
 //! 基于 [`iroh`](https://iroh.computer) 提供端到端加密的 QUIC 连接，
 //! 封装了 host/join 双端流程、票据编码、事件流与自动重连能力。
@@ -15,7 +15,7 @@
 //! Host 端：
 //!
 //! ```no_run
-//! use sculk_core::tunnel::{IrohTunnel, TunnelConfig};
+//! use sculk::tunnel::{IrohTunnel, TunnelConfig};
 //!
 //! # async fn demo() -> anyhow::Result<()> {
 //! let (_tunnel, ticket, mut events) =
@@ -32,7 +32,7 @@
 //! Join 端：
 //!
 //! ```no_run
-//! use sculk_core::tunnel::{IrohTunnel, Ticket, TunnelConfig};
+//! use sculk::tunnel::{IrohTunnel, Ticket, TunnelConfig};
 //!
 //! # async fn demo() -> anyhow::Result<()> {
 //! let ticket: Ticket = "sculk://<endpoint-id>".parse()?;
