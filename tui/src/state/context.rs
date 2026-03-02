@@ -7,7 +7,7 @@ use sculk::tunnel::IrohTunnel;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::tunnel::AppEvent;
+use crate::services::tunnel::AppEvent;
 
 /// 应用内部上下文，封装非 UI 直接渲染字段。
 pub(crate) struct AppContext {

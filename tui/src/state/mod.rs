@@ -5,16 +5,14 @@ use std::time::Instant;
 use ratatui::widgets::ListState;
 use tokio::sync::mpsc;
 
-use crate::input::InputField;
-
 mod actions;
 mod context;
 mod dispatch;
 mod events;
 mod footer_spec;
+mod input_field;
 mod logs;
 mod machine;
-mod persist;
 mod types;
 mod ui_specs;
 mod view;
@@ -27,6 +25,7 @@ pub use types::{
 pub use ui_specs::{FieldSpec, HelpLineSpec, PanelSpec, RelayOptionSpec};
 
 pub(crate) use context::AppContext;
+use input_field::InputField;
 
 /// TUI 应用全量状态，公开渲染相关字段，内部副作用通过 `AppContext` 管理。
 pub struct AppState {
@@ -75,8 +74,8 @@ impl AppState {
     /// Args: `app_tx` 为应用事件发送端。
     /// Returns: 初始化后的 `AppState`。
     /// Edge Cases: 配置加载失败时回退默认值并写日志。
-    pub fn new(app_tx: mpsc::UnboundedSender<crate::tunnel::AppEvent>) -> Self {
-        let (profile, profile_err) = persist::load_profile();
+    pub fn new(app_tx: mpsc::UnboundedSender<crate::services::tunnel::AppEvent>) -> Self {
+        let (profile, profile_err) = crate::services::persist::load_profile();
 
         let relay_idx = if profile.relay.custom { 1 } else { 0 };
         let relay_url_value = profile.relay.url.clone().unwrap_or_default();
@@ -136,7 +135,7 @@ impl AppState {
     }
 
     /// 处理来自隧道任务的内部事件。
-    pub fn handle_app_event(&mut self, event: crate::tunnel::AppEvent) {
+    pub fn handle_app_event(&mut self, event: crate::services::tunnel::AppEvent) {
         events::handle_app_event(self, event);
     }
 

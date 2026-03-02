@@ -4,9 +4,9 @@ use std::time::Instant;
 
 use sculk::tunnel::TunnelEvent;
 
-use crate::state::{AppState, TunnelPhase, persist};
-use crate::tunnel;
-use crate::tunnel::AppEvent;
+use crate::services::tunnel::AppEvent;
+use crate::services::{persist, tunnel};
+use crate::state::{AppState, TunnelPhase};
 
 /// 处理来自隧道任务的内部事件。
 pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {

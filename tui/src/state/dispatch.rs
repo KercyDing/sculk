@@ -2,8 +2,8 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use crate::services::persist;
 use crate::state::machine::{self, UiOverlayState};
-use crate::state::persist;
 use crate::state::{ActiveTab, AppState, FocusPane, HostField, InputMode, JoinField, Step};
 
 /// 键盘入口分发。
@@ -47,7 +47,7 @@ fn handle_editing_key(state: &mut AppState, key: KeyEvent) -> Step {
     match key.code {
         KeyCode::Esc => {
             state.input_mode = InputMode::Normal;
-            persist::persist_profile_from_inputs(state);
+            persist_profile_from_inputs(state);
         }
         KeyCode::Up => {
             prev_field_clamped(state);
@@ -145,7 +145,7 @@ fn handle_normal_key(state: &mut AppState, key: KeyEvent) -> Step {
     }
 }
 
-fn active_input_mut(state: &mut AppState) -> &mut crate::input::InputField {
+fn active_input_mut(state: &mut AppState) -> &mut super::input_field::InputField {
     match state.tab {
         ActiveTab::Host => match state.host_field {
             HostField::Port => &mut state.host_port,
@@ -204,4 +204,22 @@ fn next_field_clamped(state: &mut AppState) {
 
 fn prev_field_clamped(state: &mut AppState) {
     prev_field(state);
+}
+
+fn persist_profile_from_inputs(state: &mut AppState) {
+    if let Ok(port) = state.host_port.value.parse::<u16>() {
+        state.ctx.profile.host.port = port;
+    }
+    if let Ok(port) = state.join_port.value.parse::<u16>() {
+        state.ctx.profile.join.port = port;
+    }
+    let relay_url = state.relay_url.value.trim().to_string();
+    if relay_url.is_empty() {
+        state.ctx.profile.relay.url = None;
+    } else {
+        state.ctx.profile.relay.url = Some(relay_url);
+    }
+    if let Err(e) = persist::save_profile(&state.ctx.profile) {
+        state.add_log(&format!("配置保存失败: {e}"));
+    }
 }

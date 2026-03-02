@@ -184,7 +184,7 @@ fn status_label_phases() {
 
 #[test]
 fn handle_app_event_closed() {
-    use crate::tunnel::AppEvent;
+    use crate::services::tunnel::AppEvent;
 
     let mut state = test_state();
     state.phase = TunnelPhase::Active;
@@ -201,7 +201,7 @@ fn handle_app_event_closed() {
 
 #[test]
 fn handle_app_event_start_failed() {
-    use crate::tunnel::AppEvent;
+    use crate::services::tunnel::AppEvent;
 
     let mut state = test_state();
     state.phase = TunnelPhase::Starting;

@@ -1,7 +1,6 @@
 mod app;
-mod input;
+mod services;
 mod state;
-mod tunnel;
 mod ui;
 
 #[tokio::main]

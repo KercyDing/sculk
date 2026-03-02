@@ -1,4 +1,4 @@
-//! 封装 IrohTunnel 异步操作，通过 mpsc 回传事件。
+//! 隧道服务运行时：启动、关闭与事件转发。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,28 +7,9 @@ use sculk::tunnel::{IrohTunnel, Ticket, TunnelConfig, TunnelEvent};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-/// TUI 内部事件。
-pub enum AppEvent {
-    /// 隧道事件
-    Tunnel(TunnelEvent),
-    /// Host 启动成功
-    HostStarted {
-        tunnel: Arc<IrohTunnel>,
-        ticket: String,
-        events: mpsc::Receiver<TunnelEvent>,
-    },
-    /// Join 连接成功
-    JoinConnected {
-        tunnel: Arc<IrohTunnel>,
-        events: mpsc::Receiver<TunnelEvent>,
-    },
-    /// 启动失败
-    StartFailed(String),
-    /// 关闭完成
-    Closed,
-}
+use super::events::AppEvent;
 
-/// 异步启动 host 隧道，返回 JoinHandle 供外部 abort。
+/// 异步启动 host 隧道，返回 `JoinHandle` 供外部 abort。
 pub fn spawn_host(
     port: u16,
     secret_key: sculk::tunnel::SecretKey,
@@ -57,8 +38,9 @@ pub fn spawn_host(
     })
 }
 
-/// 异步启动 join 隧道，返回 JoinHandle 供外部 abort。
-/// 票据解析失败时直接发送 StartFailed，返回已完成的 handle。
+/// 异步启动 join 隧道，返回 `JoinHandle` 供外部 abort。
+///
+/// 票据解析失败时直接发送 `StartFailed`，返回已完成的 handle。
 pub fn spawn_join(
     ticket_str: &str,
     port: u16,
@@ -101,7 +83,7 @@ pub fn spawn_close(tunnel: Arc<IrohTunnel>, tx: mpsc::UnboundedSender<AppEvent>)
     });
 }
 
-/// 转发事件到 AppEvent 通道。
+/// 转发事件到 `AppEvent` 通道。
 pub fn spawn_event_forwarder(
     mut events: mpsc::Receiver<TunnelEvent>,
     tx: mpsc::UnboundedSender<AppEvent>,

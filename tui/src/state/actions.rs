@@ -1,8 +1,8 @@
 //! 主要动作：启动/加入/停止隧道与中继应用。
 
+use crate::services::{persist, tunnel};
+use crate::state::RELAYS;
 use crate::state::{ActiveTab, AppState, TunnelPhase};
-use crate::state::{RELAYS, persist};
-use crate::tunnel;
 
 /// 根据当前标签页执行主操作。
 pub(crate) fn primary_action(state: &mut AppState) {
