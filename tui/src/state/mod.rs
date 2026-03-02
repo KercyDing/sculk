@@ -16,6 +16,7 @@ mod logs;
 mod machine;
 mod persist;
 mod types;
+mod ui_specs;
 mod view;
 
 pub use footer_spec::{FooterSpec, FooterTone};
@@ -23,6 +24,7 @@ pub use types::{
     ActiveTab, FocusPane, HostField, InputMode, JoinField, LOG_CAP, RELAYS, Step, TAB_TITLES,
     TunnelPhase,
 };
+pub use ui_specs::{FieldSpec, HelpLineSpec, PanelSpec, RelayOptionSpec};
 
 pub(crate) use context::AppContext;
 
@@ -186,6 +188,36 @@ impl AppState {
     /// 生成当前状态对应的 Footer 规格。
     pub fn footer_spec(&self) -> FooterSpec {
         footer_spec::footer_spec(self)
+    }
+
+    /// 生成 Header 渲染规格。
+    pub(crate) fn header_spec(&self) -> ui_specs::HeaderSpec {
+        ui_specs::header_spec(self)
+    }
+
+    /// 生成 Logs 渲染规格。
+    pub(crate) fn logs_spec(&self, visible_height: usize) -> ui_specs::LogsSpec {
+        ui_specs::logs_spec(self, visible_height)
+    }
+
+    /// 生成 Tabs 渲染规格。
+    pub(crate) fn tabs_spec(&self) -> ui_specs::TabsSpec {
+        ui_specs::tabs_spec(self)
+    }
+
+    /// 生成帮助弹窗规格。
+    pub(crate) fn help_popup_spec(&self) -> ui_specs::HelpPopupSpec {
+        ui_specs::help_popup_spec(self)
+    }
+
+    /// 生成中止确认弹窗规格。
+    pub(crate) fn confirm_stop_popup_spec(&self) -> ui_specs::ConfirmStopPopupSpec {
+        ui_specs::confirm_stop_popup_spec(self)
+    }
+
+    /// 生成编辑弹窗规格。
+    pub(crate) fn edit_popup_spec(&self) -> ui_specs::EditPopupSpec {
+        ui_specs::edit_popup_spec(self)
     }
 
     /// 清空日志。

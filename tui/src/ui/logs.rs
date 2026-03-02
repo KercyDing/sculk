@@ -6,11 +6,11 @@ use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Borders, Gauge, Paragraph};
 
 use super::theme::{ACCENT, PANEL, border_style};
-use crate::state::{AppState, FocusPane};
+use crate::state::AppState;
 
 pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(8)]).split(area);
-    let strength = state.route_strength();
+    let base_spec = state.logs_spec(0);
     let gauge = Gauge::default()
         .block(
             Block::default()
@@ -21,38 +21,22 @@ pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppS
                 .border_style(border_style(false)),
         )
         .gauge_style(Style::default().fg(ACCENT).bg(Color::Rgb(12, 40, 30)))
-        .label(state.gauge_label())
-        .percent(strength as u16);
+        .label(base_spec.gauge.label)
+        .percent(base_spec.gauge.strength as u16);
     frame.render_widget(gauge, sections[0]);
 
     let block = Block::default()
         .title("会话日志")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(border_style(state.focus == FocusPane::Logs))
+        .border_style(border_style(base_spec.focus_logs))
         .style(Style::default().bg(PANEL));
     let inner = block.inner(sections[1]);
     frame.render_widget(block, sections[1]);
 
-    let selected = state.log_state.selected();
-    let visible_height = inner.height as usize;
-
-    // 计算滚动偏移，保证选中行可见
-    let scroll = if let Some(sel) = selected {
-        if sel >= visible_height {
-            sel - visible_height + 1
-        } else {
-            0
-        }
-    } else {
-        state.logs.len().saturating_sub(visible_height)
-    };
-
-    for (vi, idx) in (scroll..state.logs.len()).enumerate() {
-        if vi >= visible_height {
-            break;
-        }
-        let is_selected = selected == Some(idx);
+    let spec = state.logs_spec(inner.height as usize);
+    for (vi, row_spec) in spec.rows.iter().enumerate() {
+        let is_selected = row_spec.selected;
         let marker = if is_selected { "▶ " } else { "  " };
         let style = if is_selected {
             Style::default().fg(ACCENT)
@@ -67,7 +51,7 @@ pub fn render_right(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppS
         };
         frame.render_widget(
             Paragraph::new(Span::styled(
-                format!("{marker}[{:03}] {}", idx + 1, state.logs[idx]),
+                format!("{marker}[{:03}] {}", row_spec.index + 1, row_spec.text),
                 style,
             )),
             row,

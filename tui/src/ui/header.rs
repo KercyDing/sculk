@@ -9,16 +9,16 @@ use super::theme::PANEL;
 use crate::state::AppState;
 
 pub fn render_header(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
-    let (label, color) = state.status_label();
+    let spec = state.header_spec();
     let status = Span::styled(
-        label,
+        spec.status_label,
         Style::default()
-            .fg(color.color())
+            .fg(spec.status_color.color())
             .add_modifier(Modifier::BOLD),
     );
 
-    let conn_count = Span::styled(state.connection_label(), Style::default().fg(Color::Cyan));
-    let relay = Span::styled(state.relay_label(), Style::default().fg(Color::Magenta));
+    let conn_count = Span::styled(spec.connection_label, Style::default().fg(Color::Cyan));
+    let relay = Span::styled(spec.relay_label, Style::default().fg(Color::Magenta));
 
     let line = Line::from(vec![
         Span::styled(
