@@ -4,14 +4,16 @@
 [![docs.rs](https://docs.rs/sculk/badge.svg)](https://docs.rs/sculk)
 [![license](https://img.shields.io/crates/l/sculk.svg)](LICENSE)
 
+> Sculk（幽匿）是 Minecraft 深暗之域中悄然蔓延的脉络，无声地在节点间传递信号。
+> 
+> sculk 做的事类似——在玩家之间建立隐匿的隧道，让连接自然发生。
+
 一个面向 Minecraft 联机的 P2P 隧道项目，基于 iroh/QUIC，提供：
 - `sckc`：命令行客户端（CLI）
 - `sckt`：终端图形客户端（TUI）
 - `sculk`：可复用隧道核心库
 
-> Sculk（幽匿）是 Minecraft 深暗之域中悄然蔓延的脉络，无声地在节点间传递信号。
-> 
-> sculk 做的事类似——在玩家之间建立隐匿的隧道，让连接自然发生。
+> demo 程序详见[sculk-demo](https://github.com/KercyDing/sculk-demo)
 
 ## 项目结构
 
