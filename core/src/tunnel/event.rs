@@ -6,7 +6,7 @@
 //! 获取 [`ConnectionSnapshot`] 用于指标展示。
 
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// 对端节点标识，由 `EndpointId::fmt_short()` 生成的短格式。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

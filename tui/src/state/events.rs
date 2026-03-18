@@ -26,6 +26,7 @@ pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
             }
             state.ticket = Some(ticket);
 
+            state.host_password.clear();
             state.add_log("host 隧道已启动");
             state.ctx.event_forwarder = Some(tunnel::spawn_event_forwarder(
                 events,
@@ -37,6 +38,7 @@ pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
             state.phase = TunnelPhase::Active;
             state.quit_pressed_at = None;
             state.ctx.tunnel = Some(tunnel);
+            state.join_password.clear();
             state.add_log("已成功连入隧道");
 
             state.ctx.profile.join.last_ticket = Some(state.join_ticket.value.clone());
@@ -74,6 +76,8 @@ pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
             state.ticket = None;
             state.connections.clear();
             state.ctx.event_forwarder = None;
+            state.host_password.clear();
+            state.join_password.clear();
             state.add_log("隧道已关闭");
         }
         AppEvent::Tunnel(te) => handle_tunnel_event(state, te),
