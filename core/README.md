@@ -8,8 +8,9 @@ Provides tunnel establishment, ticket protocol, connection management, and event
 
 - `IrohTunnel::host` / `IrohTunnel::join` — Create or join a tunnel
 - `Ticket` — Connection ticket in `sculk://<EndpointId>?relay=<url>` format
-- `TunnelConfig` — Tunnel behavior configuration (password, max players, reconnection, etc.)
+- `HostConfig` / `JoinConfig` — Per-side tunnel configuration (password, max players, reconnection, etc.)
 - `TunnelEvent` — Runtime event stream (player join/leave, path changes, reconnection, etc.)
+- `PeerId` — Peer identity in events and snapshots
 - `ConnectionSnapshot` — Connection snapshot (direct/relay, RTT, traffic stats)
 
 ## Feature Flags
@@ -22,16 +23,16 @@ Provides tunnel establishment, ticket protocol, connection management, and event
 ## Example
 
 ```rust
-use sculk::tunnel::{IrohTunnel, TunnelConfig};
+use sculk::tunnel::{IrohTunnel, HostConfig, JoinConfig};
 
 // Host
 let (tunnel, ticket, mut rx) = IrohTunnel::host(
-    secret_key, 25565, None, TunnelConfig::default(),
+    25565, None, None, HostConfig::default(),
 ).await?;
 
 // Join
 let (tunnel, mut rx) = IrohTunnel::join(
-    &ticket, 30000, TunnelConfig::default(),
+    &ticket, 30000, JoinConfig::default(),
 ).await?;
 ```
 
@@ -47,8 +48,9 @@ let (tunnel, mut rx) = IrohTunnel::join(
 
 - `IrohTunnel::host` / `IrohTunnel::join` — 创建/加入隧道
 - `Ticket` — 连接票据，格式为 `sculk://<EndpointId>?relay=<url>`
-- `TunnelConfig` — 隧道行为配置（密码、人数上限、重连策略等）
+- `HostConfig` / `JoinConfig` — 分端隧道配置（密码、人数上限、重连策略等）
 - `TunnelEvent` — 运行时事件推送（玩家加入/离开、路径变化、重连等）
+- `PeerId` — 事件与快照中的对端标识
 - `ConnectionSnapshot` — 连接快照（直连/中继、RTT、流量统计）
 
 ### Feature Flags

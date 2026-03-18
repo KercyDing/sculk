@@ -22,7 +22,7 @@
 - `core` (`sculk`)：隧道能力与票据协议
   - `IrohTunnel::host/join`
   - `Ticket`（`sculk://...`）
-  - `TunnelConfig` / `TunnelEvent`
+  - `HostConfig` / `JoinConfig` / `TunnelEvent`
 - `cli` (`sculk-cli`)：`sckc` 命令行入口
   - 建房、加入、中继配置管理
 - `tui` (`sculk-tui`)：`sckt`（`ratatui + crossterm`）终端界面
