@@ -5,7 +5,30 @@
 //! 并可调用 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections)
 //! 获取 [`ConnectionSnapshot`] 用于指标展示。
 
+use std::fmt;
 use std::time::{Duration, Instant};
+
+/// 对端节点标识，由 `EndpointId::fmt_short()` 生成的短格式。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PeerId(String);
+
+impl PeerId {
+    pub(crate) fn new(id: String) -> Self {
+        Self(id)
+    }
+}
+
+impl fmt::Display for PeerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for PeerId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Host 端隧道配置。
 #[derive(Debug, Clone)]
@@ -110,16 +133,16 @@ impl Default for JoinConfig {
 #[non_exhaustive]
 pub enum TunnelEvent {
     /// host 侧：新玩家建立连接。
-    PlayerJoined { id: String },
+    PlayerJoined { id: PeerId },
     /// host 侧：玩家断开连接，`reason` 为 QUIC 层关闭原因。
-    PlayerLeft { id: String, reason: String },
+    PlayerLeft { id: PeerId, reason: String },
     /// join 侧：与 host 的 QUIC 连接已建立。
     Connected,
     /// join 侧：与 host 的连接断开，`reason` 为关闭原因。若将重连，随后会发送 [`Self::Reconnecting`]。
     Disconnected { reason: String },
     /// 选中路径切换或 RTT 变化时触发，`event_delay` 控制发送节流。
     PathChanged {
-        remote_id: String,
+        remote_id: PeerId,
         is_relay: bool,
         rtt_ms: u64,
     },
@@ -128,9 +151,9 @@ pub enum TunnelEvent {
     /// join 侧：重连成功。
     Reconnected,
     /// host 侧：密码验证失败，连接已被关闭。
-    AuthFailed { id: String },
+    AuthFailed { id: PeerId },
     /// host 侧：连接被主动拒绝，如服务器满员时 `reason` 为 `"server full"`。
-    PlayerRejected { id: String, reason: String },
+    PlayerRejected { id: PeerId, reason: String },
     /// 非致命的内部或 I/O 错误，隧道仍在运行。
     Error { message: String },
 }
@@ -139,8 +162,8 @@ pub enum TunnelEvent {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ConnectionSnapshot {
-    /// 对端节点 ID 的简短形式，由 `EndpointId::fmt_short()` 生成。
-    pub remote_id: String,
+    /// 对端节点 ID。
+    pub remote_id: PeerId,
     /// 当前路径是否经由 relay 转发，`false` 为直连。
     pub is_relay: bool,
     /// 选中路径的往返延迟，单位毫秒。
@@ -151,6 +174,6 @@ pub struct ConnectionSnapshot {
     pub rx_bytes: u64,
     /// 连接是否仍活跃。
     pub alive: bool,
-    /// 快照采样时刻。
-    pub timestamp: Instant,
+    /// 快照采样时刻，距隧道创建的经过时间。
+    pub elapsed: Duration,
 }

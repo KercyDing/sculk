@@ -34,7 +34,7 @@ pub(super) async fn host_accept_loop(
             .map_err(|e| crate::error::TunnelError::AcceptHostConnection(e.to_string()))?;
 
         let remote_endpoint_id = conn.remote_id();
-        let remote_id = remote_endpoint_id.fmt_short().to_string();
+        let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
         tracing::info!(remote = %remote_id, "player connected");
 
         if !capacity_check_with_grace(ctx.sessions.clone(), remote_endpoint_id, ctx.max_players)
@@ -185,7 +185,7 @@ fn spawn_rejected_conn_cleanup(
     conn: Connection,
     code: VarInt,
     reason: &'static [u8],
-    remote_id: String,
+    remote_id: PeerId,
 ) {
     tokio::spawn(async move {
         let info = conn.to_info();
@@ -225,7 +225,7 @@ mod tests {
 
     fn test_endpoint_id() -> EndpointId {
         let bytes: [u8; 32] = rand::random();
-        SecretKey::from_bytes(&bytes).public()
+        iroh::SecretKey::from_bytes(&bytes).public()
     }
 
     #[tokio::test]

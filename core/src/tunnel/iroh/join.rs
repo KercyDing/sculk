@@ -25,7 +25,7 @@ pub(super) async fn reconnect_supervisor(
     mut ctx: JoinContext,
 ) {
     loop {
-        let remote_id = conn.remote_id().fmt_short().to_string();
+        let remote_id = PeerId::new(conn.remote_id().fmt_short().to_string());
         spawn_path_monitor(conn.clone(), remote_id, tx.clone(), ctx.config.event_delay);
         let accept_handle = spawn_join_accept_loop(conn.clone(), ctx.listener.clone(), tx.clone());
 

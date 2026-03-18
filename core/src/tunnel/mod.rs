@@ -8,6 +8,6 @@ mod ticket;
 
 pub use crate::types::{RelayUrl, SecretKey};
 pub use ::iroh::EndpointId;
-pub use event::{ConnectionSnapshot, HostConfig, JoinConfig, TunnelEvent};
+pub use event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent};
 pub use iroh::IrohTunnel;
 pub use ticket::Ticket;

@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::event::{ConnectionSnapshot, HostConfig, JoinConfig, TunnelEvent};
+use super::event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent};
 use super::ticket::Ticket;
 use crate::Result;
 use crate::error::TunnelError;
@@ -44,6 +44,8 @@ const FULL_RECHECK_DELAY: Duration = Duration::from_millis(1500);
 pub struct IrohTunnel {
     endpoint: Endpoint,
     conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    /// 隧道创建时刻，用于计算 `ConnectionSnapshot::elapsed`。
+    created_at: Instant,
     /// 关闭信号发送端。
     shutdown: tokio::sync::watch::Sender<bool>,
 }
@@ -95,6 +97,7 @@ impl IrohTunnel {
             Self {
                 endpoint,
                 conns,
+                created_at: Instant::now(),
                 shutdown,
             },
             ticket,
@@ -148,6 +151,7 @@ impl IrohTunnel {
             Self {
                 endpoint,
                 conns,
+                created_at: Instant::now(),
                 shutdown,
             },
             rx,
@@ -176,13 +180,13 @@ impl IrohTunnel {
                     None => (false, 0, 0, 0),
                 };
                 ConnectionSnapshot {
-                    remote_id: info.remote_id().fmt_short().to_string(),
+                    remote_id: PeerId::new(info.remote_id().fmt_short().to_string()),
                     is_relay,
                     rtt_ms,
                     tx_bytes,
                     rx_bytes,
                     alive: info.is_alive(),
-                    timestamp: Instant::now(),
+                    elapsed: self.created_at.elapsed(),
                 }
             })
             .collect();

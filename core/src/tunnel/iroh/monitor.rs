@@ -7,7 +7,7 @@ use super::*;
 /// `event_delay == 0` 时只在状态变化时发送；否则按间隔发送并在 relay/direct 切换时立即发送。
 pub(super) fn spawn_path_monitor(
     conn: Connection,
-    remote_id: String,
+    remote_id: PeerId,
     tx: mpsc::Sender<TunnelEvent>,
     event_delay: Duration,
 ) {
@@ -76,14 +76,14 @@ fn extract_selected_path(paths: &PathInfoList) -> Option<(bool, u64)> {
 }
 
 async fn send_path_event(
-    remote_id: &str,
+    remote_id: &PeerId,
     is_relay: bool,
     rtt_ms: u64,
     tx: &mpsc::Sender<TunnelEvent>,
 ) {
     let _ = tx
         .send(TunnelEvent::PathChanged {
-            remote_id: remote_id.to_string(),
+            remote_id: remote_id.clone(),
             is_relay,
             rtt_ms,
         })
