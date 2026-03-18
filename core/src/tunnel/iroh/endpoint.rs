@@ -7,7 +7,7 @@ pub(super) fn build_endpoint(
     secret_key: Option<SecretKey>,
     relay_url: Option<&RelayUrl>,
 ) -> iroh::endpoint::Builder {
-    let mut builder = Endpoint::builder();
+    let mut builder = Endpoint::builder(iroh::endpoint::presets::N0);
     if let Some(key) = secret_key {
         builder = builder.secret_key(key);
     }

@@ -70,7 +70,7 @@ fn extract_selected_path(paths: &PathInfoList) -> Option<(bool, u64)> {
     paths
         .iter()
         .find(|p| p.is_selected())
-        .map(|p| (p.is_relay(), p.rtt().as_millis() as u64))
+        .map(|p| (p.is_relay(), p.rtt().map(|d| d.as_millis() as u64).unwrap_or(0)))
 }
 
 async fn send_path_event(

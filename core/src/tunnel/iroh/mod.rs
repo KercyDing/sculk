@@ -167,9 +167,9 @@ impl IrohTunnel {
                         let stats = p.stats();
                         (
                             p.is_relay(),
-                            stats.rtt.as_millis() as u64,
-                            stats.udp_tx.bytes,
-                            stats.udp_rx.bytes,
+                            p.rtt().map(|d| d.as_millis() as u64).unwrap_or(0),
+                            stats.map(|s| s.udp_tx.bytes).unwrap_or(0),
+                            stats.map(|s| s.udp_rx.bytes).unwrap_or(0),
                         )
                     }
                     None => (false, 0, 0, 0),

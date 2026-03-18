@@ -13,7 +13,7 @@ version = "0.1.0"
 [workspace.dependencies]
 sculk = { path = "core", version = "0.1.0" }
 anyhow = "1.0"
-iroh = "0.96"
+iroh = "0.97"
 tokio = { version = "1.49", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
