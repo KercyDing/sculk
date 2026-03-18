@@ -43,7 +43,7 @@ pub fn save_profile(_profile: &sculk::persist::Profile) -> Result<()> {
 pub fn resolve_relay_url(
     profile: &sculk::persist::Profile,
     custom: Option<&str>,
-) -> Result<Option<sculk::tunnel::RelayUrl>> {
+) -> Result<Option<sculk::RelayUrl>> {
     Ok(profile.resolve_relay_url(custom)?)
 }
 
@@ -63,7 +63,7 @@ pub fn default_key_path() -> Result<PathBuf> {
 /// Args: `path` 为密钥文件路径。
 /// Returns: 成功时返回密钥。
 /// Edge Cases: 文件系统错误时返回失败。
-pub fn load_or_generate_key(path: &Path) -> Result<sculk::tunnel::SecretKey> {
+pub fn load_or_generate_key(path: &Path) -> Result<sculk::SecretKey> {
     Ok(sculk::persist::load_or_generate_key(path)?)
 }
 

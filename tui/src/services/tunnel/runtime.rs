@@ -12,8 +12,8 @@ use super::events::AppEvent;
 /// 异步启动 host 隧道。
 pub fn spawn_host(
     port: u16,
-    secret_key: sculk::tunnel::SecretKey,
-    relay_url: Option<sculk::tunnel::RelayUrl>,
+    secret_key: sculk::SecretKey,
+    relay_url: Option<sculk::RelayUrl>,
     password: Option<String>,
     tx: mpsc::UnboundedSender<AppEvent>,
 ) -> JoinHandle<()> {

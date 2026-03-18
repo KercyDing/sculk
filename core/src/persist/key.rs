@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::Result;
 use crate::error::PersistError;
-use crate::tunnel::SecretKey;
+use crate::types::SecretKey;
 
 const KEY_LEN: usize = 32;
 

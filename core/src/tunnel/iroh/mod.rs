@@ -8,7 +8,7 @@ use iroh::endpoint::{
     ApplicationClose, Connection, ConnectionError, ConnectionInfo, PathInfoList, RecvStream,
     SendStream, VarInt,
 };
-use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher};
+use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, Watcher};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -17,6 +17,7 @@ use super::event::{ConnectionSnapshot, TunnelConfig, TunnelEvent};
 use super::ticket::Ticket;
 use crate::Result;
 use crate::error::TunnelError;
+use crate::types::{RelayUrl, SecretKey};
 
 mod auth;
 mod endpoint;

@@ -57,8 +57,10 @@ pub mod error;
 #[cfg(feature = "persist")]
 pub mod persist;
 pub mod tunnel;
+pub mod types;
 
 pub use error::{Result, SculkError};
+pub use types::{RelayUrl, SecretKey};
 
 /// Minecraft 服务端标准端口。
 pub const DEFAULT_MC_PORT: u16 = 25565;

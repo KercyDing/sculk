@@ -9,10 +9,10 @@ pub(super) fn build_endpoint(
 ) -> iroh::endpoint::Builder {
     let mut builder = Endpoint::builder(iroh::endpoint::presets::N0);
     if let Some(key) = secret_key {
-        builder = builder.secret_key(key);
+        builder = builder.secret_key(key.0);
     }
     if let Some(url) = relay_url {
-        let relay_map = RelayMap::from(url.clone());
+        let relay_map = RelayMap::from(url.0.clone());
         builder = builder.relay_mode(RelayMode::Custom(relay_map));
     }
     builder

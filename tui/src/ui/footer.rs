@@ -43,6 +43,3 @@ fn key_style(tone: FooterTone) -> Style {
         FooterTone::Error => Style::default().fg(ERROR),
     }
 }
-
-#[allow(dead_code)]
-fn _assert_footer_spec_used(_spec: &FooterSpec) {}

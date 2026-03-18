@@ -8,7 +8,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::error::TicketError;
-use iroh::{EndpointId, RelayUrl};
+use crate::types::RelayUrl;
+use iroh::EndpointId;
 
 const SCHEME: &str = "sculk";
 

@@ -6,7 +6,8 @@ mod event;
 mod iroh;
 mod ticket;
 
-pub use ::iroh::{RelayUrl, SecretKey};
+pub use crate::types::{RelayUrl, SecretKey};
+pub use ::iroh::EndpointId;
 pub use event::{ConnectionSnapshot, TunnelConfig, TunnelEvent};
 pub use iroh::IrohTunnel;
 pub use ticket::Ticket;

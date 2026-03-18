@@ -83,7 +83,6 @@ impl InputField {
         self.cursor = self.value.len();
     }
 
-    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.value.clear();
         self.cursor = 0;

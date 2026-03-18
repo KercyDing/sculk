@@ -141,7 +141,7 @@ impl Profile {
     pub fn resolve_relay_url(
         &self,
         custom: Option<&str>,
-    ) -> Result<Option<crate::tunnel::RelayUrl>> {
+    ) -> Result<Option<crate::types::RelayUrl>> {
         let url_str = custom.or(if self.relay.custom {
             self.relay.url.as_deref()
         } else {
@@ -149,8 +149,8 @@ impl Profile {
         });
         match url_str {
             Some(s) => {
-                let url: crate::tunnel::RelayUrl = s
-                    .parse::<crate::tunnel::RelayUrl>()
+                let url: crate::types::RelayUrl = s
+                    .parse::<crate::types::RelayUrl>()
                     .map_err(|e| PersistError::RelayUrlParse(e.to_string()))?;
                 Ok(Some(url))
             }
