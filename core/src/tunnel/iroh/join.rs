@@ -214,7 +214,7 @@ pub(super) async fn connect_with_retry(
     }
 
     if let Some(err) = last_err {
-        Err(crate::error::TunnelError::ConnectHostEndpoint(err.to_string()).into())
+        Err(crate::error::TunnelError::ConnectHostEndpoint(err.into()).into())
     } else {
         Err(crate::error::TunnelError::InitialConnectionExhausted {
             attempts: max.saturating_add(1),
@@ -229,7 +229,7 @@ async fn join_accept_loop(conn: Connection, listener: Arc<TcpListener>) -> crate
         let (tcp, peer) = listener
             .accept()
             .await
-            .map_err(|e| crate::error::TunnelError::AcceptLocalTcpClient(e.to_string()))?;
+            .map_err(|e| crate::error::TunnelError::AcceptLocalTcpClient(e.into()))?;
         tracing::info!(%peer, "MC client connected");
 
         let conn = conn.clone();

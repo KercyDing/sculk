@@ -18,21 +18,21 @@ pub(super) async fn auth_send(conn: &Connection, password: &str) -> crate::Resul
     let (mut send, mut recv) = conn
         .open_bi()
         .await
-        .map_err(|e| crate::error::TunnelError::OpenAuthStream(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::OpenAuthStream(e.into()))?;
 
     let mut buf = Vec::with_capacity(1 + password.len());
     buf.push(AUTH_VERSION);
     buf.extend_from_slice(password.as_bytes());
     send.write_all(&buf)
         .await
-        .map_err(|e| crate::error::TunnelError::WriteAuthPayload(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::WriteAuthPayload(e.into()))?;
     send.finish()
-        .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.into()))?;
 
     let result = recv
         .read_to_end(1)
         .await
-        .map_err(|e| crate::error::TunnelError::ReadAuthResult(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::ReadAuthResult(e.into()))?;
 
     if result.first() == Some(&AUTH_OK) {
         Ok(())
@@ -46,19 +46,19 @@ pub(super) async fn auth_verify(conn: &Connection, expected: &str) -> crate::Res
     let (mut send, mut recv) = conn
         .accept_bi()
         .await
-        .map_err(|e| crate::error::TunnelError::AcceptAuthStream(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::AcceptAuthStream(e.into()))?;
 
     let data = recv
         .read_to_end(AUTH_READ_LIMIT)
         .await
-        .map_err(|e| crate::error::TunnelError::ReadAuthPayload(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::ReadAuthPayload(e.into()))?;
 
     if data.is_empty() {
         send.write_all(&[AUTH_REJECTED])
             .await
-            .map_err(|e| crate::error::TunnelError::WriteAuthRejected(e.to_string()))?;
+            .map_err(|e| crate::error::TunnelError::WriteAuthRejected(e.into()))?;
         send.finish()
-            .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.to_string()))?;
+            .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.into()))?;
         return Ok(false);
     }
 
@@ -66,9 +66,9 @@ pub(super) async fn auth_verify(conn: &Connection, expected: &str) -> crate::Res
     if version != AUTH_VERSION {
         send.write_all(&[AUTH_REJECTED])
             .await
-            .map_err(|e| crate::error::TunnelError::WriteAuthRejected(e.to_string()))?;
+            .map_err(|e| crate::error::TunnelError::WriteAuthRejected(e.into()))?;
         send.finish()
-            .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.to_string()))?;
+            .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.into()))?;
         return Ok(false);
     }
 
@@ -77,9 +77,9 @@ pub(super) async fn auth_verify(conn: &Connection, expected: &str) -> crate::Res
 
     send.write_all(&[if ok { AUTH_OK } else { AUTH_REJECTED }])
         .await
-        .map_err(|e| crate::error::TunnelError::WriteAuthDecision(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::WriteAuthDecision(e.into()))?;
     send.finish()
-        .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.to_string()))?;
+        .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.into()))?;
 
     Ok(ok)
 }

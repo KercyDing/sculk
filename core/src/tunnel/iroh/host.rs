@@ -31,7 +31,7 @@ pub(super) async fn host_accept_loop(
                 crate::error::TunnelError::AcceptHostConnection("endpoint closed".into())
             })?
             .await
-            .map_err(|e| crate::error::TunnelError::AcceptHostConnection(e.to_string()))?;
+            .map_err(|e| crate::error::TunnelError::AcceptHostConnection(e.into()))?;
 
         let remote_endpoint_id = conn.remote_id();
         let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
@@ -201,7 +201,7 @@ async fn host_handle_conn(conn: Connection, mc_port: u16) -> crate::Result<()> {
         let (send, recv) = conn
             .accept_bi()
             .await
-            .map_err(|e| crate::error::TunnelError::AcceptQuicBiStream(e.to_string()))?;
+            .map_err(|e| crate::error::TunnelError::AcceptQuicBiStream(e.into()))?;
 
         tokio::spawn(async move {
             let tcp = match TcpStream::connect(("127.0.0.1", mc_port)).await {

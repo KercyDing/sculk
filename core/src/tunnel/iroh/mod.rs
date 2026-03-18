@@ -63,7 +63,7 @@ impl IrohTunnel {
         let endpoint = builder
             .bind()
             .await
-            .map_err(|e| TunnelError::BindHostEndpoint(e.to_string()))?;
+            .map_err(|e| TunnelError::BindHostEndpoint(e.into()))?;
         endpoint.online().await;
 
         let ticket = Ticket::new(endpoint.id(), relay_url);
@@ -114,7 +114,7 @@ impl IrohTunnel {
         let endpoint = build_endpoint(None, ticket.relay_url.as_ref())
             .bind()
             .await
-            .map_err(|e| TunnelError::BindJoinEndpoint(e.to_string()))?;
+            .map_err(|e| TunnelError::BindJoinEndpoint(e.into()))?;
 
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
@@ -128,7 +128,7 @@ impl IrohTunnel {
         let listener = Arc::new(
             TcpListener::bind(("127.0.0.1", local_port))
                 .await
-                .map_err(|e| TunnelError::BindLocalListener(e.to_string()))?,
+                .map_err(|e| TunnelError::BindLocalListener(e.into()))?,
         );
         tracing::info!(local_port, "listening for MC clients");
 

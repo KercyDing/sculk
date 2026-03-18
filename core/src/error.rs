@@ -4,6 +4,9 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+/// 装箱的错误源类型，用于保留原始错误链。
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
 /// 持久化层错误。
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -71,62 +74,62 @@ pub enum TunnelError {
     #[error("mutex poisoned: {name}")]
     MutexPoisoned { name: &'static str },
     /// 绑定 host endpoint 失败。
-    #[error("bind host endpoint failed: {0}")]
-    BindHostEndpoint(String),
+    #[error("bind host endpoint failed")]
+    BindHostEndpoint(#[source] BoxError),
     /// 绑定 join endpoint 失败。
-    #[error("bind join endpoint failed: {0}")]
-    BindJoinEndpoint(String),
+    #[error("bind join endpoint failed")]
+    BindJoinEndpoint(#[source] BoxError),
     /// 绑定本地 TCP 监听失败。
-    #[error("bind local tcp listener failed: {0}")]
-    BindLocalListener(String),
+    #[error("bind local tcp listener failed")]
+    BindLocalListener(#[source] BoxError),
     /// host accept 失败。
-    #[error("accept host connection failed: {0}")]
-    AcceptHostConnection(String),
+    #[error("accept host connection failed")]
+    AcceptHostConnection(#[source] BoxError),
     /// QUIC 双向流 accept 失败。
-    #[error("accept QUIC bi stream failed: {0}")]
-    AcceptQuicBiStream(String),
+    #[error("accept QUIC bi stream failed")]
+    AcceptQuicBiStream(#[source] BoxError),
     /// 本地 TCP 客户端 accept 失败。
-    #[error("accept local tcp client failed: {0}")]
-    AcceptLocalTcpClient(String),
+    #[error("accept local tcp client failed")]
+    AcceptLocalTcpClient(#[source] BoxError),
     /// 与 host 建连失败。
-    #[error("connect host endpoint failed: {0}")]
-    ConnectHostEndpoint(String),
+    #[error("connect host endpoint failed")]
+    ConnectHostEndpoint(#[source] BoxError),
     /// 初次连接重试耗尽。
     #[error("initial connection failed after {attempts} attempts")]
     InitialConnectionExhausted { attempts: u32 },
     /// 打开认证流失败。
-    #[error("open auth stream failed: {0}")]
-    OpenAuthStream(String),
+    #[error("open auth stream failed")]
+    OpenAuthStream(#[source] BoxError),
     /// 接收认证流失败。
-    #[error("accept auth stream failed: {0}")]
-    AcceptAuthStream(String),
+    #[error("accept auth stream failed")]
+    AcceptAuthStream(#[source] BoxError),
     /// 读取认证结果失败。
-    #[error("read auth result failed: {0}")]
-    ReadAuthResult(String),
+    #[error("read auth result failed")]
+    ReadAuthResult(#[source] BoxError),
     /// 读取认证负载失败。
-    #[error("read auth payload failed: {0}")]
-    ReadAuthPayload(String),
+    #[error("read auth payload failed")]
+    ReadAuthPayload(#[source] BoxError),
     /// 写入认证负载失败。
-    #[error("write auth payload failed: {0}")]
-    WriteAuthPayload(String),
+    #[error("write auth payload failed")]
+    WriteAuthPayload(#[source] BoxError),
     /// 写入认证拒绝失败。
-    #[error("write auth rejected failed: {0}")]
-    WriteAuthRejected(String),
+    #[error("write auth rejected failed")]
+    WriteAuthRejected(#[source] BoxError),
     /// 写入认证决策失败。
-    #[error("write auth decision failed: {0}")]
-    WriteAuthDecision(String),
+    #[error("write auth decision failed")]
+    WriteAuthDecision(#[source] BoxError),
     /// 结束认证流失败。
-    #[error("finish auth stream failed: {0}")]
-    FinishAuthStream(String),
+    #[error("finish auth stream failed")]
+    FinishAuthStream(#[source] BoxError),
     /// 认证被 host 拒绝。
     #[error("auth rejected by host")]
     AuthRejectedByHost,
     /// 桥接 tcp->quic 失败。
-    #[error("bridge tcp->quic failed: {0}")]
-    BridgeTcpToQuic(String),
+    #[error("bridge tcp->quic failed")]
+    BridgeTcpToQuic(#[source] BoxError),
     /// 桥接 quic->tcp 失败。
-    #[error("bridge quic->tcp failed: {0}")]
-    BridgeQuicToTcp(String),
+    #[error("bridge quic->tcp failed")]
+    BridgeQuicToTcp(#[source] BoxError),
 }
 
 /// sculk core 顶层错误。

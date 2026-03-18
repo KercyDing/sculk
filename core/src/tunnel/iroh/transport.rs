@@ -20,7 +20,7 @@ pub(super) async fn bridge(
     tokio::select! {
         r = tokio::io::copy(&mut tcp_read, &mut send) => {
             let _ = send.finish();
-            r.map_err(|e| crate::error::TunnelError::BridgeTcpToQuic(e.to_string()))?;
+            r.map_err(|e| crate::error::TunnelError::BridgeTcpToQuic(e.into()))?;
             // TCP->QUIC 方向结束，等待 QUIC->TCP 方向排空
             let _ = tokio::time::timeout(
                 DRAIN_TIMEOUT,
@@ -28,7 +28,7 @@ pub(super) async fn bridge(
             ).await;
         }
         r = tokio::io::copy(&mut recv, &mut tcp_write) => {
-            r.map_err(|e| crate::error::TunnelError::BridgeQuicToTcp(e.to_string()))?;
+            r.map_err(|e| crate::error::TunnelError::BridgeQuicToTcp(e.into()))?;
             // QUIC->TCP 方向结束，等待 TCP->QUIC 方向排空
             let drain = tokio::time::timeout(
                 DRAIN_TIMEOUT,
