@@ -100,6 +100,7 @@ pub(crate) fn handle_tunnel_event(state: &mut AppState, event: TunnelEvent) {
         TunnelEvent::AuthFailed { id } => format!("认证失败: {id}"),
         TunnelEvent::PlayerRejected { id, reason } => format!("玩家被拒: {id} ({reason})"),
         TunnelEvent::Error { message } => format!("错误: {message}"),
+        _ => "未知事件".to_string(),
     };
     state.add_log(&msg);
 }

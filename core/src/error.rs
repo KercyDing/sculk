@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// 持久化层错误。
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PersistError {
     /// 系统数据目录不可用。
     #[error("cannot determine system data directory")]
@@ -40,6 +41,7 @@ pub enum PersistError {
 
 /// 票据解析错误。
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TicketError {
     /// URL 解析失败。
     #[error(transparent)]
@@ -63,6 +65,7 @@ pub enum TicketError {
 
 /// 隧道运行时错误。
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TunnelError {
     /// 锁中毒。
     #[error("mutex poisoned: {name}")]
@@ -128,6 +131,7 @@ pub enum TunnelError {
 
 /// sculk core 顶层错误。
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SculkError {
     /// 持久化错误。
     #[error(transparent)]

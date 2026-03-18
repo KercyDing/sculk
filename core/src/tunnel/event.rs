@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 /// 隧道行为配置，在创建 host 或 join 隧道时传入。
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct TunnelConfig {
     /// `PathChanged` 发送策略：`ZERO` 仅变化时发送，非零按间隔发送。
     pub event_delay: Duration,
@@ -24,6 +25,37 @@ pub struct TunnelConfig {
     pub max_backoff: Duration,
     /// 最大玩家数（仅 host 侧，按唯一 `EndpointId` 计）。
     pub max_players: Option<u32>,
+}
+
+impl TunnelConfig {
+    /// 创建指定字段的配置，其余使用默认值。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 设置 `PathChanged` 事件节流间隔。
+    pub fn event_delay(mut self, delay: Duration) -> Self {
+        self.event_delay = delay;
+        self
+    }
+
+    /// 设置连接密码。
+    pub fn password(mut self, password: Option<String>) -> Self {
+        self.password = password;
+        self
+    }
+
+    /// 设置最大重连次数（join 侧）。
+    pub fn max_retries(mut self, max_retries: Option<u32>) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    /// 设置最大玩家数（host 侧）。
+    pub fn max_players(mut self, max_players: Option<u32>) -> Self {
+        self.max_players = max_players;
+        self
+    }
 }
 
 impl Default for TunnelConfig {
@@ -45,6 +77,7 @@ impl Default for TunnelConfig {
 /// host 侧接收玩家连接/断开/拒绝事件，join 侧接收连接/重连/断开事件，
 /// 双端均可收到 `PathChanged` 和 `Error`。
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum TunnelEvent {
     /// host 侧：新玩家建立连接。
     PlayerJoined { id: String },
@@ -74,6 +107,7 @@ pub enum TunnelEvent {
 
 /// 单条连接的瞬时状态快照，由 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections) 返回。
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ConnectionSnapshot {
     /// 对端节点 ID 的简短形式，由 `EndpointId::fmt_short()` 生成。
     pub remote_id: String,

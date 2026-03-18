@@ -128,12 +128,10 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
 
             let profile = Profile::load()?;
             let relay_url = profile.resolve_relay_url(relay.as_deref())?;
-            let config = TunnelConfig {
-                event_delay: Duration::from_secs(delay),
-                password,
-                max_players,
-                ..Default::default()
-            };
+            let config = TunnelConfig::new()
+                .event_delay(Duration::from_secs(delay))
+                .password(password)
+                .max_players(max_players);
 
             let (tunnel, ticket, mut events) =
                 IrohTunnel::host(port, Some(secret_key), relay_url, config).await?;
@@ -175,12 +173,10 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
                 println!("Relay: {url}");
             }
 
-            let config = TunnelConfig {
-                event_delay: Duration::from_secs(delay),
-                password,
-                max_retries,
-                ..Default::default()
-            };
+            let config = TunnelConfig::new()
+                .event_delay(Duration::from_secs(delay))
+                .password(password)
+                .max_retries(max_retries);
 
             let (tunnel, mut events) = IrohTunnel::join(&ticket, port, config).await?;
             println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
@@ -258,6 +254,7 @@ fn print_event(event: &TunnelEvent) {
         TunnelEvent::PlayerRejected { id, reason } => {
             println!("[-] Player rejected: {id} ({reason})")
         }
+        _ => {}
     }
 }
 

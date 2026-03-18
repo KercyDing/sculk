@@ -18,11 +18,9 @@ pub fn spawn_host(
     tx: mpsc::UnboundedSender<AppEvent>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let config = TunnelConfig {
-            event_delay: Duration::ZERO,
-            password,
-            ..Default::default()
-        };
+        let config = TunnelConfig::new()
+            .event_delay(Duration::ZERO)
+            .password(password);
         match IrohTunnel::host(port, Some(secret_key), relay_url, config).await {
             Ok((tunnel, ticket, events)) => {
                 let _ = tx.send(AppEvent::HostStarted {
@@ -56,11 +54,9 @@ pub fn spawn_join(
                 return;
             }
         };
-        let config = TunnelConfig {
-            event_delay: Duration::ZERO,
-            password,
-            ..Default::default()
-        };
+        let config = TunnelConfig::new()
+            .event_delay(Duration::ZERO)
+            .password(password);
         match IrohTunnel::join(&ticket, port, config).await {
             Ok((tunnel, events)) => {
                 let _ = tx.send(AppEvent::JoinConnected {
