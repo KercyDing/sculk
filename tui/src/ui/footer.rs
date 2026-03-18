@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::theme::{ACCENT, BG, ERROR, INFO};
-use crate::state::{AppState, FooterSpec, FooterTone};
+use crate::state::{AppState, FooterTone};
 
 pub fn render_footer(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
     let spec = state.footer_spec();

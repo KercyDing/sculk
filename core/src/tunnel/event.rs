@@ -1,64 +1,95 @@
 //! 隧道配置、运行时事件与连接快照类型。
 //!
-//! 调用方通过 [`TunnelConfig`] 描述隧道行为策略，
+//! 调用方通过 [`HostConfig`] / [`JoinConfig`] 描述隧道行为策略，
 //! 通过 `mpsc::Receiver<TunnelEvent>` 接收运行时状态推送，
 //! 并可调用 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections)
 //! 获取 [`ConnectionSnapshot`] 用于指标展示。
 
 use std::time::{Duration, Instant};
 
-/// 隧道行为配置，在创建 host 或 join 隧道时传入。
+/// Host 端隧道配置。
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct TunnelConfig {
+pub struct HostConfig {
     /// `PathChanged` 发送策略：`ZERO` 仅变化时发送，非零按间隔发送。
     pub event_delay: Duration,
     /// 连接密码，`None` 表示不校验。
     pub password: Option<String>,
-    /// 最大重连次数（join 侧）：`None` 无限，`Some(0)` 关闭重连。
-    pub max_retries: Option<u32>,
-    /// 首次连接的重试上限（join 侧），默认 3 次。
-    pub initial_retries: u32,
-    /// 重连初始退避（仅 join 侧）。
-    pub base_backoff: Duration,
-    /// 重连最大退避（仅 join 侧）。
-    pub max_backoff: Duration,
-    /// 最大玩家数（仅 host 侧，按唯一 `EndpointId` 计）。
+    /// 最大玩家数（按唯一 `EndpointId` 计）。
     pub max_players: Option<u32>,
 }
 
-impl TunnelConfig {
-    /// 创建指定字段的配置，其余使用默认值。
+impl HostConfig {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// 设置 `PathChanged` 事件节流间隔。
     pub fn event_delay(mut self, delay: Duration) -> Self {
         self.event_delay = delay;
         self
     }
 
-    /// 设置连接密码。
     pub fn password(mut self, password: Option<String>) -> Self {
         self.password = password;
         self
     }
 
-    /// 设置最大重连次数（join 侧）。
-    pub fn max_retries(mut self, max_retries: Option<u32>) -> Self {
-        self.max_retries = max_retries;
-        self
-    }
-
-    /// 设置最大玩家数（host 侧）。
     pub fn max_players(mut self, max_players: Option<u32>) -> Self {
         self.max_players = max_players;
         self
     }
 }
 
-impl Default for TunnelConfig {
+impl Default for HostConfig {
+    fn default() -> Self {
+        Self {
+            event_delay: Duration::ZERO,
+            password: None,
+            max_players: None,
+        }
+    }
+}
+
+/// Join 端隧道配置。
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct JoinConfig {
+    /// `PathChanged` 发送策略：`ZERO` 仅变化时发送，非零按间隔发送。
+    pub event_delay: Duration,
+    /// 连接密码，`None` 表示不校验。
+    pub password: Option<String>,
+    /// 最大重连次数：`None` 无限，`Some(0)` 关闭重连。
+    pub max_retries: Option<u32>,
+    /// 首次连接的重试上限，默认 3 次。
+    pub initial_retries: u32,
+    /// 重连初始退避。
+    pub base_backoff: Duration,
+    /// 重连最大退避。
+    pub max_backoff: Duration,
+}
+
+impl JoinConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn event_delay(mut self, delay: Duration) -> Self {
+        self.event_delay = delay;
+        self
+    }
+
+    pub fn password(mut self, password: Option<String>) -> Self {
+        self.password = password;
+        self
+    }
+
+    pub fn max_retries(mut self, max_retries: Option<u32>) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+}
+
+impl Default for JoinConfig {
     fn default() -> Self {
         Self {
             event_delay: Duration::ZERO,
@@ -67,7 +98,6 @@ impl Default for TunnelConfig {
             initial_retries: 3,
             base_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
-            max_players: None,
         }
     }
 }

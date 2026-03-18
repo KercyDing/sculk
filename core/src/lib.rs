@@ -7,7 +7,7 @@
 //!
 //! - [`tunnel::IrohTunnel`]：创建 host 或 join 隧道。
 //! - [`tunnel::Ticket`]：`sculk://` 连接票据（可序列化分享）。
-//! - [`tunnel::TunnelConfig`]：密码、重连、人数上限、事件节流等配置。
+//! - [`tunnel::HostConfig`] / [`tunnel::JoinConfig`]：分端配置。
 //! - [`tunnel::TunnelEvent`]：运行时状态与错误事件。
 //!
 //! # Examples
@@ -15,11 +15,11 @@
 //! Host 端：
 //!
 //! ```no_run
-//! use sculk::tunnel::{IrohTunnel, TunnelConfig};
+//! use sculk::tunnel::{IrohTunnel, HostConfig};
 //!
 //! # async fn demo() -> sculk::Result<()> {
 //! let (_tunnel, ticket, mut events) =
-//!     IrohTunnel::host(25565, None, None, TunnelConfig::default()).await?;
+//!     IrohTunnel::host(25565, None, None, HostConfig::default()).await?;
 //! println!("share ticket: {ticket}");
 //!
 //! while let Some(event) = events.recv().await {
@@ -32,11 +32,11 @@
 //! Join 端：
 //!
 //! ```no_run
-//! use sculk::tunnel::{IrohTunnel, Ticket, TunnelConfig};
+//! use sculk::tunnel::{IrohTunnel, Ticket, JoinConfig};
 //!
 //! # async fn demo() -> sculk::Result<()> {
 //! let ticket: Ticket = "sculk://<endpoint-id>".parse()?;
-//! let (_tunnel, mut events) = IrohTunnel::join(&ticket, 30000, TunnelConfig::default()).await?;
+//! let (_tunnel, mut events) = IrohTunnel::join(&ticket, 30000, JoinConfig::default()).await?;
 //!
 //! while let Some(event) = events.recv().await {
 //!     println!("{event:?}");
@@ -47,9 +47,9 @@
 //!
 //! # Notes
 //!
-//! - `TunnelConfig::max_players` 按唯一 `EndpointId` 计数。
-//! - `TunnelConfig::password` 是应用层校验，不替代传输层加密。
-//! - `join` 侧是否自动重连由 `max_retries` 控制。
+//! - `HostConfig::max_players` 按唯一 `EndpointId` 计数。
+//! - 密码是应用层校验，不替代传输层加密。
+//! - `join` 侧是否自动重连由 `JoinConfig::max_retries` 控制。
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;

@@ -10,7 +10,7 @@ use super::transport::bridge;
 pub(super) struct JoinContext {
     pub(super) listener: Arc<TcpListener>,
     pub(super) conns: Arc<Mutex<Vec<ConnectionInfo>>>,
-    pub(super) config: TunnelConfig,
+    pub(super) config: JoinConfig,
     /// 关闭信号：为 true 或 sender 被丢弃时，supervisor 应立即退出。
     pub(super) shutdown: tokio::sync::watch::Receiver<bool>,
 }
@@ -177,7 +177,7 @@ fn is_permanent_rejection(err: &ConnectionError) -> bool {
 pub(super) async fn connect_with_retry(
     endpoint: &Endpoint,
     endpoint_id: iroh::EndpointId,
-    config: &TunnelConfig,
+    config: &JoinConfig,
     tx: &mpsc::Sender<TunnelEvent>,
 ) -> crate::Result<Connection> {
     let max = config.initial_retries;

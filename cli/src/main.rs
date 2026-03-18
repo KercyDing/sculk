@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use sculk::persist::{self, Profile};
-use sculk::tunnel::{IrohTunnel, TunnelConfig, TunnelEvent};
+use sculk::tunnel::{HostConfig, IrohTunnel, JoinConfig, TunnelEvent};
 use tracing_subscriber::EnvFilter;
 
 const CLAP_STYLES: clap::builder::styling::Styles = clap::builder::styling::Styles::styled()
@@ -128,7 +128,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
 
             let profile = Profile::load()?;
             let relay_url = profile.resolve_relay_url(relay.as_deref())?;
-            let config = TunnelConfig::new()
+            let config = HostConfig::new()
                 .event_delay(Duration::from_secs(delay))
                 .password(password)
                 .max_players(max_players);
@@ -173,7 +173,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
                 println!("Relay: {url}");
             }
 
-            let config = TunnelConfig::new()
+            let config = JoinConfig::new()
                 .event_delay(Duration::from_secs(delay))
                 .password(password)
                 .max_retries(max_retries);

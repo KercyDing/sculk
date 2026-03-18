@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::event::{ConnectionSnapshot, TunnelConfig, TunnelEvent};
+use super::event::{ConnectionSnapshot, HostConfig, JoinConfig, TunnelEvent};
 use super::ticket::Ticket;
 use crate::Result;
 use crate::error::TunnelError;
@@ -54,7 +54,7 @@ impl IrohTunnel {
         mc_port: u16,
         secret_key: Option<SecretKey>,
         relay_url: Option<RelayUrl>,
-        config: TunnelConfig,
+        config: HostConfig,
     ) -> Result<(Self, Ticket, mpsc::Receiver<TunnelEvent>)> {
         let mut builder = build_endpoint(secret_key, relay_url.as_ref());
         builder = builder.alpns(vec![ALPN.to_vec()]);
@@ -106,7 +106,7 @@ impl IrohTunnel {
     pub async fn join(
         ticket: &Ticket,
         local_port: u16,
-        config: TunnelConfig,
+        config: JoinConfig,
     ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
         let endpoint = build_endpoint(None, ticket.relay_url.as_ref())
             .bind()

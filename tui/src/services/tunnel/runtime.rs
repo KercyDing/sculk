@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sculk::tunnel::{IrohTunnel, Ticket, TunnelConfig, TunnelEvent};
+use sculk::tunnel::{HostConfig, IrohTunnel, JoinConfig, Ticket, TunnelEvent};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -18,7 +18,7 @@ pub fn spawn_host(
     tx: mpsc::UnboundedSender<AppEvent>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let config = TunnelConfig::new()
+        let config = HostConfig::new()
             .event_delay(Duration::ZERO)
             .password(password);
         match IrohTunnel::host(port, Some(secret_key), relay_url, config).await {
@@ -54,7 +54,7 @@ pub fn spawn_join(
                 return;
             }
         };
-        let config = TunnelConfig::new()
+        let config = JoinConfig::new()
             .event_delay(Duration::ZERO)
             .password(password);
         match IrohTunnel::join(&ticket, port, config).await {
