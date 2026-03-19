@@ -93,3 +93,47 @@ jobs:
             sckc-*
             sckt-*
           generate_release_notes: true
+
+  aur:
+    needs: release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - pkg: sculk-cli-bin
+            dir: packaging/arch/sculk-cli-bin
+          - pkg: sculk-tui-bin
+            dir: packaging/arch/sculk-tui-bin
+          - pkg: sculk-cli-git
+            dir: packaging/arch/sculk-cli-git
+          - pkg: sculk-tui-git
+            dir: packaging/arch/sculk-tui-git
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update pkgver in PKGBUILD
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" ${{ matrix.dir }}/PKGBUILD
+
+      - name: Update sha256sums for -bin packages
+        if: contains(matrix.pkg, '-bin')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "${{ matrix.pkg }}" == "sculk-cli-bin" ]]; then
+            ASSET_URL="https://github.com/KercyDing/sculk/releases/download/v${VERSION}/sckc-linux-amd64"
+          else
+            ASSET_URL="https://github.com/KercyDing/sculk/releases/download/v${VERSION}/sckt-linux-amd64"
+          fi
+          SHA=$(curl -sL "$ASSET_URL" | sha256sum | cut -d' ' -f1)
+          sed -i "s/^sha256sums=.*/sha256sums=('${SHA}')/" ${{ matrix.dir }}/PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: ${{ matrix.pkg }}
+          pkgbuild: ${{ matrix.dir }}/PKGBUILD
+          commit_username: KercyDing
+          commit_email: dkx215417@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.ref_name }}"

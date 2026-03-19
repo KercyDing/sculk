@@ -1,0 +1,16 @@
+# Maintainer: KercyDing <dkx215417@gmail.com>
+pkgname=sculk-tui-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Minecraft P2P multiplayer tunnel TUI client"
+arch=('x86_64')
+url="https://github.com/KercyDing/sculk"
+license=('GPL-3.0-only')
+provides=('sculk-tui' 'sckt')
+conflicts=('sculk-tui-git')
+source=("sckt-${pkgver}::${url}/releases/download/v${pkgver}/sckt-linux-amd64")
+sha256sums=('SKIP')
+
+package() {
+    install -Dm755 "${srcdir}/sckt-${pkgver}" "${pkgdir}/usr/bin/sckt"
+}

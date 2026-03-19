@@ -1,0 +1,16 @@
+# Maintainer: KercyDing <dkx215417@gmail.com>
+pkgname=sculk-cli-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Minecraft P2P multiplayer tunnel CLI"
+arch=('x86_64')
+url="https://github.com/KercyDing/sculk"
+license=('GPL-3.0-only')
+provides=('sculk-cli' 'sckc')
+conflicts=('sculk-cli-git')
+source=("sckc-${pkgver}::${url}/releases/download/v${pkgver}/sckc-linux-amd64")
+sha256sums=('SKIP')
+
+package() {
+    install -Dm755 "${srcdir}/sckc-${pkgver}" "${pkgdir}/usr/bin/sckc"
+}
