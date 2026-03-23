@@ -6,6 +6,8 @@
 
 一个面向 Minecraft 联机的 P2P 隧道项目，基于 iroh/QUIC。
 
+客户端程序在这里 → [shrieker](https://github.com/KercyDing/shrieker)
+
 > Sculk（幽匿）是 Minecraft 深暗之域中悄然蔓延的脉络，无声地在节点间传递信号。
 >
 > sculk 做的事类似，在玩家之间建立隐匿的隧道，让连接自然发生。
@@ -13,8 +15,6 @@
 - `sckc`：命令行客户端（CLI）
 - `sckt`：终端图形客户端（TUI）
 - `sculk`：隧道核心库
-
-> demo 程序详见 [sculk-demo](https://github.com/KercyDing/sculk-demo)
 
 ## 快速开始
 
