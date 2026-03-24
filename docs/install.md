@@ -1,4 +1,4 @@
-# 下载与安装
+# 下载、安装与卸载
 
 ## CLI（`sckc`）
 
@@ -85,3 +85,30 @@ cd sculk
 
 cargo install --path tui
 ```
+
+## 卸载
+
+### 方式一：一键脚本（推荐）
+
+#### macOS / Linux
+
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.sh)"
+```
+
+#### Windows PowerShell
+
+```powershell
+& $([scriptblock]::Create((irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.ps1)))
+```
+
+脚本会交互式询问卸载项，可选择 `sckc`、`sckt` 或“全部”。
+
+### 方式二：Cargo 卸载
+
+```sh
+cargo uninstall sculk-cli
+cargo uninstall sculk-tui
+```
+
+注意：二进制名分别是 `sckc` / `sckt`，对应的 Cargo 包名是 `sculk-cli` / `sculk-tui`。

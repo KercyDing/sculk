@@ -33,7 +33,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scrip
 ```
 
 详见文档：
-- [下载与安装](docs/install.md)
+- [下载、安装与卸载](docs/install.md)
 
 ### 简单用法
 
