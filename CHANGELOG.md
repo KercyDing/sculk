@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0-rc.1] - 2026-06-04
+
+### Breaking Changes
+
+- 升级 iroh 0.97 → 1.0.0-rc.1，适配连接信息和路径监听 API 变更
+- MSRV 从 Rust 1.89 提升到 Rust 1.91
+
+### Internal
+
+- 用内部 `TrackedConnection` 替代上游移除的 `ConnectionInfo`
+- 路径变化监听改用 `paths_stream()`
+
 ## [0.2.0] - 2026-03-19
 
 ### Breaking Changes

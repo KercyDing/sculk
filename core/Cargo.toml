@@ -19,6 +19,7 @@ clipboard = ["dep:arboard"]
 persist = ["dep:dirs", "dep:rand", "dep:serde", "dep:toml"]
 
 [dependencies]
+futures-util.workspace = true
 iroh.workspace = true
 tokio.workspace = true
 tracing.workspace = true

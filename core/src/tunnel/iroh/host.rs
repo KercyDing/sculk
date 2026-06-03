@@ -9,7 +9,7 @@ use super::transport::bridge;
 
 /// Host 接受循环的运行时上下文。
 pub(super) struct HostContext {
-    pub(super) conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    pub(super) conns: Arc<Mutex<Vec<TrackedConnection>>>,
     pub(super) sessions: Arc<Mutex<HostSessions>>,
     pub(super) event_delay: Duration,
     pub(super) password: Option<String>,
@@ -85,8 +85,8 @@ pub(super) async fn host_accept_loop(
             old_conn.close(CLOSE_REPLACED_BY_RECONNECT, b"replaced by reconnect");
         }
 
-        let conn_info = conn.to_info();
-        super::lock_mutex(&ctx.conns, "host connections")?.push(conn_info.clone());
+        let conn_handle = conn.weak_handle();
+        super::lock_mutex(&ctx.conns, "host connections")?.push(TrackedConnection::new(&conn));
 
         if is_reconnect {
             tracing::info!(remote = %remote_id, "player reconnected");
@@ -104,8 +104,8 @@ pub(super) async fn host_accept_loop(
         let left_id = remote_id.clone();
         let sessions_on_close = ctx.sessions.clone();
         tokio::spawn(async move {
-            let reason = match conn_info.closed().await {
-                Some((err, _stats)) => err.to_string(),
+            let reason = match conn_handle.closed().await {
+                Some(closed) => closed.reason.to_string(),
                 None => "connection closed".to_string(),
             };
             let mut lock_error = None;
@@ -188,9 +188,9 @@ fn spawn_rejected_conn_cleanup(
     remote_id: PeerId,
 ) {
     tokio::spawn(async move {
-        let info = conn.to_info();
+        let handle = conn.weak_handle();
         conn.close(code, reason);
-        let _ = tokio::time::timeout(REJECT_DRAIN_TIMEOUT, info.closed()).await;
+        let _ = tokio::time::timeout(REJECT_DRAIN_TIMEOUT, handle.closed()).await;
         tracing::debug!(remote = %remote_id, "rejected connection cleanup finished");
     });
 }

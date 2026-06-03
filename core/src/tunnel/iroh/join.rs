@@ -9,7 +9,7 @@ use super::transport::bridge;
 /// Join 重连 supervisor 的运行时上下文。
 pub(super) struct JoinContext {
     pub(super) listener: Arc<TcpListener>,
-    pub(super) conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    pub(super) conns: Arc<Mutex<Vec<TrackedConnection>>>,
     pub(super) config: JoinConfig,
     /// 关闭信号：为 true 或 sender 被丢弃时，supervisor 应立即退出。
     pub(super) shutdown: tokio::sync::watch::Receiver<bool>,
@@ -20,7 +20,6 @@ pub(super) async fn reconnect_supervisor(
     endpoint: Endpoint,
     endpoint_id: iroh::EndpointId,
     mut conn: Connection,
-    mut conn_info: ConnectionInfo,
     tx: mpsc::Sender<TunnelEvent>,
     mut ctx: JoinContext,
 ) {
@@ -28,16 +27,17 @@ pub(super) async fn reconnect_supervisor(
         let remote_id = PeerId::new(conn.remote_id().fmt_short().to_string());
         spawn_path_monitor(conn.clone(), remote_id, tx.clone(), ctx.config.event_delay);
         let accept_handle = spawn_join_accept_loop(conn.clone(), ctx.listener.clone(), tx.clone());
+        let conn_handle = conn.weak_handle();
 
         // 等待连接关闭，或提前收到关闭信号
         let permanent_reject = tokio::select! {
-            result = conn_info.closed() => {
+            result = conn_handle.closed() => {
                 accept_handle.abort();
-                if let Some((err, _stats)) = result {
-                    let rejected = is_permanent_rejection(&err);
+                if let Some(closed) = result {
+                    let rejected = is_permanent_rejection(&closed.reason);
                     let _ = tx
                         .send(TunnelEvent::Disconnected {
-                            reason: err.to_string(),
+                            reason: closed.reason.to_string(),
                         })
                         .await;
                     rejected
@@ -113,13 +113,12 @@ pub(super) async fn reconnect_supervisor(
         };
 
         conn = reconnected;
-        conn_info = conn.to_info();
 
         let lock_error = {
             match super::lock_mutex(&ctx.conns, "join connections") {
                 Ok(mut guard) => {
                     guard.retain(|c| c.is_alive());
-                    guard.push(conn_info.clone());
+                    guard.push(TrackedConnection::new(&conn));
                     None
                 }
                 Err(e) => Some(e),

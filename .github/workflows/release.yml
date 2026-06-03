@@ -114,7 +114,8 @@ jobs:
       - name: Update pkgver in PKGBUILD
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" ${{ matrix.dir }}/PKGBUILD
+          PKGVER="${VERSION//-/_}"
+          sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" ${{ matrix.dir }}/PKGBUILD
 
       - name: Update sha256sums for -bin packages
         if: contains(matrix.pkg, '-bin')

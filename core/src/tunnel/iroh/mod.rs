@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use iroh::endpoint::{
-    ApplicationClose, Connection, ConnectionError, ConnectionInfo, PathInfoList, RecvStream,
-    SendStream, VarInt,
+    ApplicationClose, Connection, ConnectionError, RecvStream, SendStream, VarInt,
+    WeakConnectionHandle,
 };
-use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, Watcher};
+use iroh::{Endpoint, EndpointId};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -40,10 +40,72 @@ const CLOSE_REPLACED_BY_RECONNECT: VarInt = VarInt::from_u32(3);
 const REJECT_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 const FULL_RECHECK_DELAY: Duration = Duration::from_millis(1500);
 
+#[derive(Debug, Clone)]
+pub(super) struct TrackedConnection {
+    remote_id: EndpointId,
+    handle: WeakConnectionHandle,
+}
+
+impl TrackedConnection {
+    fn new(conn: &Connection) -> Self {
+        Self {
+            remote_id: conn.remote_id(),
+            handle: conn.weak_handle(),
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        self.handle
+            .upgrade()
+            .is_some_and(|conn| conn.close_reason().is_none())
+    }
+
+    fn snapshot(&self, elapsed: Duration) -> ConnectionSnapshot {
+        let remote_id = PeerId::new(self.remote_id.fmt_short().to_string());
+
+        let Some(conn) = self.handle.upgrade() else {
+            return ConnectionSnapshot {
+                remote_id,
+                is_relay: false,
+                rtt_ms: 0,
+                tx_bytes: 0,
+                rx_bytes: 0,
+                alive: false,
+                elapsed,
+            };
+        };
+
+        let paths = conn.paths();
+        let path = paths.iter().find(|path| path.is_selected());
+        let (is_relay, rtt_ms, tx_bytes, rx_bytes) = match path {
+            Some(path) => {
+                let stats = path.stats();
+                (
+                    path.is_relay(),
+                    path.rtt().as_millis() as u64,
+                    stats.udp_tx.bytes,
+                    stats.udp_rx.bytes,
+                )
+            }
+            None => (false, 0, 0, 0),
+        };
+
+        ConnectionSnapshot {
+            remote_id,
+            is_relay,
+            rtt_ms,
+            tx_bytes,
+            rx_bytes,
+            alive: conn.close_reason().is_none(),
+            elapsed,
+        }
+    }
+}
+
 /// 基于 iroh 的 P2P 隧道。
 pub struct IrohTunnel {
     endpoint: Endpoint,
-    conns: Arc<Mutex<Vec<ConnectionInfo>>>,
+    conns: Arc<Mutex<Vec<TrackedConnection>>>,
     /// 隧道创建时刻，用于计算 `ConnectionSnapshot::elapsed`。
     created_at: Instant,
     /// 关闭信号发送端。
@@ -68,7 +130,7 @@ impl IrohTunnel {
 
         let ticket = Ticket::new(endpoint.id(), relay_url);
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
-        let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
+        let conns: Arc<Mutex<Vec<TrackedConnection>>> = Arc::new(Mutex::new(Vec::new()));
         let sessions: Arc<Mutex<HostSessions>> = Arc::new(Mutex::new(HostSessions::default()));
 
         let ep = endpoint.clone();
@@ -117,12 +179,11 @@ impl IrohTunnel {
             .map_err(|e| TunnelError::BindJoinEndpoint(e.into()))?;
 
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
-        let conns: Arc<Mutex<Vec<ConnectionInfo>>> = Arc::new(Mutex::new(Vec::new()));
+        let conns: Arc<Mutex<Vec<TrackedConnection>>> = Arc::new(Mutex::new(Vec::new()));
 
         let conn = connect_with_retry(&endpoint, ticket.endpoint_id, &config, &tx).await?;
 
-        let conn_info = conn.to_info();
-        lock_mutex(&conns, "join connections")?.push(conn_info.clone());
+        lock_mutex(&conns, "join connections")?.push(TrackedConnection::new(&conn));
         let _ = tx.send(TunnelEvent::Connected).await;
 
         let listener = Arc::new(
@@ -144,7 +205,7 @@ impl IrohTunnel {
                 config,
                 shutdown: shutdown_rx,
             };
-            reconnect_supervisor(ep, endpoint_id, conn, conn_info, tx, ctx).await;
+            reconnect_supervisor(ep, endpoint_id, conn, tx, ctx).await;
         });
 
         Ok((
@@ -163,33 +224,9 @@ impl IrohTunnel {
         let mut guard = lock_mutex(&self.conns, "tunnel connections")?;
         guard.retain(|c| c.is_alive());
 
-        let snapshots: Vec<ConnectionSnapshot> = guard
-            .iter()
-            .map(|info| {
-                let path = info.selected_path();
-                let (is_relay, rtt_ms, tx_bytes, rx_bytes) = match &path {
-                    Some(p) => {
-                        let stats = p.stats();
-                        (
-                            p.is_relay(),
-                            p.rtt().map(|d| d.as_millis() as u64).unwrap_or(0),
-                            stats.map(|s| s.udp_tx.bytes).unwrap_or(0),
-                            stats.map(|s| s.udp_rx.bytes).unwrap_or(0),
-                        )
-                    }
-                    None => (false, 0, 0, 0),
-                };
-                ConnectionSnapshot {
-                    remote_id: PeerId::new(info.remote_id().fmt_short().to_string()),
-                    is_relay,
-                    rtt_ms,
-                    tx_bytes,
-                    rx_bytes,
-                    alive: info.is_alive(),
-                    elapsed: self.created_at.elapsed(),
-                }
-            })
-            .collect();
+        let elapsed = self.created_at.elapsed();
+        let snapshots: Vec<ConnectionSnapshot> =
+            guard.iter().map(|conn| conn.snapshot(elapsed)).collect();
         Ok(snapshots)
     }
 

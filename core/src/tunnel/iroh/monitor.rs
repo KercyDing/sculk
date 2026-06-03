@@ -1,6 +1,8 @@
 //! 网络路径监控：监听 iroh 路径变化，派发 `PathChanged` 事件。
 
 use super::*;
+use futures_util::StreamExt;
+use iroh::endpoint::PathList;
 
 /// 监控路径变化并发送 `PathChanged` 事件。
 ///
@@ -12,11 +14,13 @@ pub(super) fn spawn_path_monitor(
     event_delay: Duration,
 ) {
     tokio::spawn(async move {
-        let mut watcher = conn.paths();
+        let mut watcher = conn.paths_stream();
         let mut last_is_relay: Option<bool> = None;
         let mut last_rtt_ms: Option<u64> = None;
 
-        if let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) {
+        if let Some(paths) = watcher.next().await
+            && let Some((is_relay, rtt_ms)) = extract_selected_path(&paths)
+        {
             send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
             last_is_relay = Some(is_relay);
             last_rtt_ms = Some(rtt_ms);
@@ -24,10 +28,10 @@ pub(super) fn spawn_path_monitor(
 
         if event_delay.is_zero() {
             loop {
-                if watcher.updated().await.is_err() {
+                let Some(paths) = watcher.next().await else {
                     break;
-                }
-                let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) else {
+                };
+                let Some((is_relay, rtt_ms)) = extract_selected_path(&paths) else {
                     continue;
                 };
                 if last_is_relay != Some(is_relay) || last_rtt_ms != Some(rtt_ms) {
@@ -42,21 +46,25 @@ pub(super) fn spawn_path_monitor(
 
             loop {
                 tokio::select! {
-                    result = watcher.updated() => {
-                        if result.is_err() { break; }
-                        let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) else {
+                    next_paths = watcher.next() => {
+                        let Some(paths) = next_paths else {
+                            break;
+                        };
+                        let Some((is_relay, rtt_ms)) = extract_selected_path(&paths) else {
                             continue;
                         };
-                        if last_is_relay != Some(is_relay) {
+                        if last_is_relay != Some(is_relay) || last_rtt_ms != Some(rtt_ms) {
                             send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
                             last_is_relay = Some(is_relay);
+                            last_rtt_ms = Some(rtt_ms);
                             timer.reset();
                         }
                     }
                     _ = timer.tick() => {
-                        if let Some((is_relay, rtt_ms)) = extract_selected_path(&watcher.get()) {
+                        if let Some((is_relay, rtt_ms)) = extract_selected_path(&conn.paths()) {
                             send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
                             last_is_relay = Some(is_relay);
+                            last_rtt_ms = Some(rtt_ms);
                         }
                     }
                 }
@@ -66,13 +74,11 @@ pub(super) fn spawn_path_monitor(
 }
 
 /// 提取当前选中路径的 `(is_relay, rtt_ms)`。
-fn extract_selected_path(paths: &PathInfoList) -> Option<(bool, u64)> {
-    paths.iter().find(|p| p.is_selected()).map(|p| {
-        (
-            p.is_relay(),
-            p.rtt().map(|d| d.as_millis() as u64).unwrap_or(0),
-        )
-    })
+fn extract_selected_path(paths: &PathList<'_>) -> Option<(bool, u64)> {
+    paths
+        .iter()
+        .find(|p| p.is_selected())
+        .map(|p| (p.is_relay(), p.rtt().as_millis() as u64))
 }
 
 async fn send_path_event(
