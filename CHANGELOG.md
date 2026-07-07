@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-07-07
+
+### Changes
+
+- `cargo update` 升级项目依赖
+
 ## [0.3.0-rc.1] - 2026-06-04
 
 ### Breaking Changes

@@ -2,7 +2,7 @@
 
 ## 环境
 
-- Rust `1.91.1`
+- Rust `1.94.0`
 - `just`（命令管理）
 - `cargo-nextest`（测试）
 
