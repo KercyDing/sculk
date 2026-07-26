@@ -1,5 +1,7 @@
 # sculk
 
+[![English](https://img.shields.io/badge/README-English-2f81f7)](README.en.md)
+
 [![crates.io](https://img.shields.io/crates/v/sculk.svg)](https://crates.io/crates/sculk)
 [![docs.rs](https://docs.rs/sculk/badge.svg)](https://docs.rs/sculk)
 [![license](https://img.shields.io/crates/l/sculk.svg)](LICENSE)
@@ -51,10 +53,35 @@ sckt
 详见文档：
 - [使用说明](docs/usage.md)
 
-## 文档
+## Relay 与自建部署
 
-- [开发文档](docs/develop.md)
-- [自建 Relay](https://github.com/KercyDing/iroh-relay)
+sculk 会优先尝试建立 P2P 直连；当双方受 NAT、网络策略或运营商环境限制而无法直连时，连接需要经过 Relay 转发。
+
+项目默认使用 iroh 提供的公共 Relay，开箱即用，但其可用性、网络延迟和带宽不由 sculk 控制，部分地区或复杂网络环境下可能出现连接缓慢、不稳定或无法连接。sculk 本身也不提供公共 Relay 的可用性保证。
+
+如果需要更稳定的入口、更合适的服务器地域，或者希望自行控制带宽和服务可用性，可以部署专用 Relay，并在 `sckc`、`sckt` 或上层应用中配置其 URL。
+
+部署方法和可直接使用的构建产物见：[iroh-relay](https://github.com/KercyDing/iroh-relay)
+
+## 给开发者
+
+开发需要 Rust `1.91.0` 或更高版本，并使用 [`only`](https://github.com/KercyDing/only) 运行项目任务；`cargo-nextest` 为可选依赖。
+
+Workspace 包含三个 crate：
+
+- `core`：隧道核心库（`sculk`）
+- `cli`：命令行客户端（`sculk-cli` / `sckc`）
+- `tui`：终端图形客户端（`sculk-tui` / `sckt`）
+
+常用命令：
+
+```sh
+only check       # 格式、编译与 Clippy 检查
+only ci          # 检查并运行开发测试
+only dev build   # 开发构建
+only rel build   # 发布构建
+only install     # 构建并安装 sckc 和 sckt
+```
 
 ## 许可证
 
