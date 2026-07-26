@@ -3,12 +3,18 @@ name = "sculk-cli"
 categories = ["network-programming", "command-line-utilities"]
 description = "Minecraft P2P multiplayer tunnel CLI"
 documentation = "https://docs.rs/sculk-cli"
-include = ["/src/**", "/Cargo.toml", "/README.md"]
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+]
 keywords = ["minecraft", "p2p", "tunnel", "cli"]
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT OR Apache-2.0"
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true

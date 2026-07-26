@@ -3,12 +3,18 @@ name = "sculk"
 categories = ["network-programming", "game-development"]
 description = "P2P tunnel core library for Minecraft multiplayer"
 documentation = "https://docs.rs/sculk"
-include = ["/src/**", "/Cargo.toml", "/README.md"]
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+]
 keywords = ["minecraft", "p2p", "tunnel", "quic", "iroh"]
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT OR Apache-2.0"
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true

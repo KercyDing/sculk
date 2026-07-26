@@ -1,10 +1,9 @@
 # sculk
 
-[![English](https://img.shields.io/badge/README-English-2f81f7)](README.en.md)
+<kbd>[English](README-en.md)</kbd>
 
 [![crates.io](https://img.shields.io/crates/v/sculk.svg)](https://crates.io/crates/sculk)
 [![docs.rs](https://docs.rs/sculk/badge.svg)](https://docs.rs/sculk)
-[![license](https://img.shields.io/crates/l/sculk.svg)](LICENSE)
 
 一个面向 Minecraft 联机的 P2P 隧道项目，基于 iroh/QUIC。
 
@@ -85,4 +84,6 @@ only install     # 构建并安装 sckc 和 sckt
 
 ## 许可证
 
-[GNU GPLv3](LICENSE)
+Copyright (C) 2026 KercyDing
+
+整个项目采用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 双重许可，使用者可任选其一。

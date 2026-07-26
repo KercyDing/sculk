@@ -3,12 +3,18 @@ name = "sculk-tui"
 categories = ["network-programming", "command-line-utilities"]
 description = "Minecraft P2P multiplayer tunnel TUI client"
 documentation = "https://docs.rs/sculk-tui"
-include = ["/src/**", "/Cargo.toml", "/README.md"]
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+]
 keywords = ["minecraft", "p2p", "tunnel", "tui", "ratatui"]
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT OR Apache-2.0"
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true

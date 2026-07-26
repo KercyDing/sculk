@@ -1,10 +1,9 @@
 # sculk
 
-[![简体中文](https://img.shields.io/badge/README-简体中文-2f81f7)](README.md)
+<kbd>[简体中文](README.md)</kbd>
 
 [![crates.io](https://img.shields.io/crates/v/sculk.svg)](https://crates.io/crates/sculk)
 [![docs.rs](https://docs.rs/sculk/badge.svg)](https://docs.rs/sculk)
-[![license](https://img.shields.io/crates/l/sculk.svg)](LICENSE)
 
 A P2P tunnel for playing Minecraft over the Internet, built with iroh and QUIC.
 
@@ -83,4 +82,6 @@ only install     # Build and install sckc and sckt
 
 ## License
 
-[GNU GPLv3](LICENSE)
+Copyright (C) 2026 KercyDing
+
+The entire project is dual-licensed under your choice of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

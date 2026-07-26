@@ -93,3 +93,10 @@ sckc relay --reset
 ```
 
 更多信息见[项目主页](https://github.com/KercyDing/sculk)。
+
+## 许可证
+
+Copyright (C) 2026 KercyDing
+
+本客户端采用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 双重许可，
+使用者可任选其一。

@@ -145,3 +145,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 |---|---|---|
 | `persist` | 否 | 密钥与用户配置持久化 |
 | `clipboard` | 否 | 写入系统剪贴板 |
+
+### License / 许可证
+
+Licensed under your choice of [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE).
+
+本核心库采用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 双重许可，
+使用者可任选其一。
