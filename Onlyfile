@@ -17,6 +17,7 @@ install() ? @os("windows") & _release_build shell?=pwsh:
     New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA "Programs\Sculk") | Out-Null
     Copy-Item target/release/sckc.exe -Destination (Join-Path $env:LOCALAPPDATA "Programs\Sculk\sckc.exe") -Force
     Copy-Item target/release/sckt.exe -Destination (Join-Path $env:LOCALAPPDATA "Programs\Sculk\sckt.exe") -Force
+    $installDir = Join-Path $env:LOCALAPPDATA "Programs\Sculk"; $userPath = [Environment]::GetEnvironmentVariable("Path", "User"); if ($userPath -split ";" -notcontains $installDir) { $newPath = if ([string]::IsNullOrEmpty($userPath)) { $installDir } else { "$userPath;$installDir" }; [Environment]::SetEnvironmentVariable("Path", $newPath, "User"); Write-Output "Added $installDir to the user PATH. Open a new terminal to use it." }
     Write-Output "Installed sckc and sckt to $(Join-Path $env:LOCALAPPDATA 'Programs\Sculk')"
 
 install() & _release_build:

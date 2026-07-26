@@ -31,7 +31,7 @@ $components = switch ($choice) {
     }
 }
 
-$INSTALL_DIR = "$env:LOCALAPPDATA\sculk"
+$INSTALL_DIR = Join-Path $env:LOCALAPPDATA "Programs\Sculk"
 New-Item -ItemType Directory -Force -Path $INSTALL_DIR | Out-Null
 
 $installed = 0

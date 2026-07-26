@@ -19,7 +19,7 @@ $components = switch ($choice) {
     }
 }
 
-$INSTALL_DIR = "$env:LOCALAPPDATA\sculk"
+$INSTALL_DIR = Join-Path $env:LOCALAPPDATA "Programs\Sculk"
 $removedAny = $false
 
 foreach ($component in $components) {
