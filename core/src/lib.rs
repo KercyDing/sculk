@@ -6,6 +6,7 @@
 //! # Overview
 //!
 //! - [`tunnel::IrohTunnel`]：创建 host 或 join 隧道。
+//! - [`tunnel::TunnelService`]：托管单条隧道的生命周期、状态与多调用方事件订阅。
 //! - [`tunnel::Ticket`]：`sculk://` 连接票据（可序列化分享）。
 //! - [`tunnel::HostConfig`] / [`tunnel::JoinConfig`]：分端配置。
 //! - [`tunnel::TunnelEvent`]：运行时状态与错误事件。
@@ -50,6 +51,7 @@
 //! - `HostConfig::max_players` 按唯一 `EndpointId` 计数。
 //! - 密码是应用层校验，不替代传输层加密。
 //! - `join` 侧是否自动重连由 `JoinConfig::max_retries` 控制。
+//! - 简单集成优先使用 `TunnelService`；需要直接拥有事件接收端时使用 `IrohTunnel`。
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;

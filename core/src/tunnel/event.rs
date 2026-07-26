@@ -161,7 +161,7 @@ pub enum TunnelEvent {
 }
 
 /// 单条连接的瞬时状态快照，由 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections) 返回。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ConnectionSnapshot {
     /// 对端节点 ID。

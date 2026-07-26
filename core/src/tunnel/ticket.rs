@@ -14,7 +14,7 @@ use iroh::EndpointId;
 const SCHEME: &str = "sculk";
 
 /// 连接票据，包含目标节点与可选 relay 地址。
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ticket {
     pub endpoint_id: EndpointId,
     pub relay_url: Option<RelayUrl>,
