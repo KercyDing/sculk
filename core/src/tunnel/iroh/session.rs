@@ -21,8 +21,14 @@ impl HostSessions {
         self.by_id.len()
     }
 
-    pub(super) fn contains(&self, endpoint_id: &EndpointId) -> bool {
+    pub(super) fn has_capacity_for(
+        &self,
+        endpoint_id: &EndpointId,
+        max_players: Option<u32>,
+    ) -> bool {
         self.by_id.contains_key(endpoint_id)
+            || max_players
+                .is_none_or(|max| u32::try_from(self.active_players()).unwrap_or(u32::MAX) < max)
     }
 
     /// 插入或更新会话，返回 `(generation, is_reconnect, old_conn)`。
@@ -87,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn session_generation_guards_player_left() {
+    fn generation_filters_stale_close() {
         let endpoint_id = test_endpoint_id();
         let mut sessions = HostSessions::default();
         sessions.insert_for_test(endpoint_id, 2);
@@ -97,5 +103,24 @@ mod tests {
 
         assert!(sessions.remove_if_current(&endpoint_id, 2));
         assert_eq!(sessions.active_players(), 0);
+    }
+
+    #[test]
+    fn full_allows_reconnect() {
+        let endpoint_id = test_endpoint_id();
+        let mut sessions = HostSessions::default();
+        sessions.insert_for_test(endpoint_id, 1);
+
+        assert!(sessions.has_capacity_for(&endpoint_id, Some(1)));
+    }
+
+    #[test]
+    fn full_rejects_new_peer() {
+        let existing = test_endpoint_id();
+        let incoming = test_endpoint_id();
+        let mut sessions = HostSessions::default();
+        sessions.insert_for_test(existing, 1);
+
+        assert!(!sessions.has_capacity_for(&incoming, Some(1)));
     }
 }

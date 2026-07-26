@@ -15,6 +15,12 @@ const AUTH_REJECTED: u8 = 0x01;
 
 /// Join 侧发送密码并等待验证结果。
 pub(super) async fn auth_send(conn: &Connection, password: &str) -> crate::Result<()> {
+    tokio::time::timeout(AUTH_TIMEOUT, auth_send_inner(conn, password))
+        .await
+        .map_err(|_| crate::error::TunnelError::AuthTimedOut)?
+}
+
+async fn auth_send_inner(conn: &Connection, password: &str) -> crate::Result<()> {
     let (mut send, mut recv) = conn
         .open_bi()
         .await
@@ -43,6 +49,12 @@ pub(super) async fn auth_send(conn: &Connection, password: &str) -> crate::Resul
 
 /// Host 侧验证密码并回写结果。
 pub(super) async fn auth_verify(conn: &Connection, expected: &str) -> crate::Result<bool> {
+    tokio::time::timeout(AUTH_TIMEOUT, auth_verify_inner(conn, expected))
+        .await
+        .map_err(|_| crate::error::TunnelError::AuthTimedOut)?
+}
+
+async fn auth_verify_inner(conn: &Connection, expected: &str) -> crate::Result<bool> {
     let (mut send, mut recv) = conn
         .accept_bi()
         .await

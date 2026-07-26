@@ -21,7 +21,7 @@ pub(super) fn spawn_path_monitor(
         if let Some(paths) = watcher.next().await
             && let Some((is_relay, rtt_ms)) = extract_selected_path(&paths)
         {
-            send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+            send_path_event(&remote_id, is_relay, rtt_ms, &tx);
             last_is_relay = Some(is_relay);
             last_rtt_ms = Some(rtt_ms);
         }
@@ -34,8 +34,9 @@ pub(super) fn spawn_path_monitor(
                 let Some((is_relay, rtt_ms)) = extract_selected_path(&paths) else {
                     continue;
                 };
-                if last_is_relay != Some(is_relay) || last_rtt_ms != Some(rtt_ms) {
-                    send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+                if should_emit_on_update(event_delay, last_is_relay, last_rtt_ms, is_relay, rtt_ms)
+                {
+                    send_path_event(&remote_id, is_relay, rtt_ms, &tx);
                     last_is_relay = Some(is_relay);
                     last_rtt_ms = Some(rtt_ms);
                 }
@@ -53,16 +54,24 @@ pub(super) fn spawn_path_monitor(
                         let Some((is_relay, rtt_ms)) = extract_selected_path(&paths) else {
                             continue;
                         };
-                        if last_is_relay != Some(is_relay) || last_rtt_ms != Some(rtt_ms) {
-                            send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+                        if should_emit_on_update(
+                            event_delay,
+                            last_is_relay,
+                            last_rtt_ms,
+                            is_relay,
+                            rtt_ms,
+                        ) {
+                            send_path_event(&remote_id, is_relay, rtt_ms, &tx);
                             last_is_relay = Some(is_relay);
                             last_rtt_ms = Some(rtt_ms);
                             timer.reset();
+                        } else {
+                            last_rtt_ms = Some(rtt_ms);
                         }
                     }
                     _ = timer.tick() => {
                         if let Some((is_relay, rtt_ms)) = extract_selected_path(&conn.paths()) {
-                            send_path_event(&remote_id, is_relay, rtt_ms, &tx).await;
+                            send_path_event(&remote_id, is_relay, rtt_ms, &tx);
                             last_is_relay = Some(is_relay);
                             last_rtt_ms = Some(rtt_ms);
                         }
@@ -81,17 +90,63 @@ fn extract_selected_path(paths: &PathList<'_>) -> Option<(bool, u64)> {
         .map(|p| (p.is_relay(), p.rtt().as_millis() as u64))
 }
 
-async fn send_path_event(
+fn should_emit_on_update(
+    event_delay: Duration,
+    last_is_relay: Option<bool>,
+    last_rtt_ms: Option<u64>,
+    is_relay: bool,
+    rtt_ms: u64,
+) -> bool {
+    last_is_relay != Some(is_relay) || (event_delay.is_zero() && last_rtt_ms != Some(rtt_ms))
+}
+
+fn send_path_event(
     remote_id: &PeerId,
     is_relay: bool,
     rtt_ms: u64,
     tx: &mpsc::Sender<TunnelEvent>,
 ) {
-    let _ = tx
-        .send(TunnelEvent::PathChanged {
+    super::emit_event(
+        tx,
+        TunnelEvent::PathChanged {
             remote_id: remote_id.clone(),
             is_relay,
             rtt_ms,
-        })
-        .await;
+        },
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_delay_tracks_rtt() {
+        assert!(should_emit_on_update(
+            Duration::ZERO,
+            Some(false),
+            Some(20),
+            false,
+            21
+        ));
+    }
+
+    #[test]
+    fn delay_throttles_rtt() {
+        let delay = Duration::from_secs(1);
+        assert!(!should_emit_on_update(
+            delay,
+            Some(false),
+            Some(20),
+            false,
+            21
+        ));
+        assert!(should_emit_on_update(
+            delay,
+            Some(false),
+            Some(20),
+            true,
+            21
+        ));
+    }
 }

@@ -1,6 +1,7 @@
 //! P2P 隧道：基于 iroh QUIC 的 TCP 端口转发层。
 //!
-//! [`IrohTunnel`] 是主入口，host/join 双端共用 [`TunnelConfig`] 与 [`TunnelEvent`]。
+//! [`IrohTunnel`] 是主入口，host/join 分别使用 [`HostConfig`]、[`JoinConfig`]，
+//! 并通过 [`TunnelEvent`] 报告运行状态。
 
 mod event;
 mod iroh;

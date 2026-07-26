@@ -35,17 +35,18 @@ pub(super) async fn reconnect_supervisor(
                 accept_handle.abort();
                 if let Some(closed) = result {
                     let rejected = is_permanent_rejection(&closed.reason);
-                    let _ = tx
-                        .send(TunnelEvent::Disconnected {
+                    super::emit_event(
+                        &tx,
+                        TunnelEvent::Disconnected {
                             reason: closed.reason.to_string(),
-                        })
-                        .await;
+                        },
+                    );
                     rejected
                 } else {
                     false
                 }
             }
-            _ = wait_for_shutdown(&mut ctx.shutdown) => {
+            _ = super::wait_for_shutdown(&mut ctx.shutdown) => {
                 accept_handle.abort();
                 return;
             }
@@ -66,11 +67,12 @@ pub(super) async fn reconnect_supervisor(
             if let Some(max) = ctx.config.max_retries
                 && attempt > max
             {
-                let _ = tx
-                    .send(TunnelEvent::Error {
+                super::emit_event(
+                    &tx,
+                    TunnelEvent::Error {
                         message: format!("max retries ({max}) exceeded, giving up"),
-                    })
-                    .await;
+                    },
+                );
                 return;
             }
 
@@ -81,14 +83,14 @@ pub(super) async fn reconnect_supervisor(
                 ctx.config.max_backoff,
             );
 
-            let _ = tx.send(TunnelEvent::Reconnecting { attempt }).await;
+            super::emit_event(&tx, TunnelEvent::Reconnecting { attempt });
 
             tracing::info!(attempt, ?backoff, "reconnecting...");
 
             // backoff sleep 期间响应关闭信号
             tokio::select! {
                 _ = tokio::time::sleep(backoff) => {}
-                _ = wait_for_shutdown(&mut ctx.shutdown) => return,
+                _ = super::wait_for_shutdown(&mut ctx.shutdown) => return,
             }
 
             if *ctx.shutdown.borrow() {
@@ -101,6 +103,15 @@ pub(super) async fn reconnect_supervisor(
                         && let Err(e) = auth_send(&new_conn, password).await
                     {
                         tracing::warn!(attempt, "reconnect auth failed: {e}");
+                        if is_permanent_auth_error(&e, &new_conn) {
+                            super::emit_event(
+                                &tx,
+                                TunnelEvent::Error {
+                                    message: format!("reconnect rejected: {e}"),
+                                },
+                            );
+                            return;
+                        }
                         continue;
                     }
                     break new_conn;
@@ -125,25 +136,18 @@ pub(super) async fn reconnect_supervisor(
             }
         };
         if let Some(e) = lock_error {
-            let _ = tx
-                .send(TunnelEvent::Error {
+            super::emit_event(
+                &tx,
+                TunnelEvent::Error {
                     message: e.to_string(),
-                })
-                .await;
+                },
+            );
             return;
         }
 
-        let _ = tx.send(TunnelEvent::Reconnected).await;
+        super::emit_event(&tx, TunnelEvent::Reconnected);
         tracing::info!("reconnected successfully");
     }
-}
-
-/// value 变为 true 或 sender 被丢弃时返回（均视为关闭信号）。
-async fn wait_for_shutdown(rx: &mut tokio::sync::watch::Receiver<bool>) {
-    if *rx.borrow() {
-        return;
-    }
-    let _ = rx.changed().await;
 }
 
 /// 启动 join accept loop。
@@ -154,11 +158,12 @@ fn spawn_join_accept_loop(
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         if let Err(e) = join_accept_loop(conn, listener).await {
-            let _ = tx
-                .send(TunnelEvent::Error {
+            super::emit_event(
+                &tx,
+                TunnelEvent::Error {
                     message: format!("join loop ended: {e}"),
-                })
-                .await;
+                },
+            );
         }
     })
 }
@@ -170,6 +175,21 @@ fn is_permanent_rejection(err: &ConnectionError) -> bool {
     } else {
         false
     }
+}
+
+fn is_permanent_auth_error(err: &crate::error::SculkError, conn: &Connection) -> bool {
+    is_auth_rejected(err)
+        || conn
+            .close_reason()
+            .as_ref()
+            .is_some_and(is_permanent_rejection)
+}
+
+fn is_auth_rejected(err: &crate::error::SculkError) -> bool {
+    matches!(
+        err,
+        crate::error::SculkError::Tunnel(crate::error::TunnelError::AuthRejectedByHost)
+    )
 }
 
 /// 含 auth的重试连接流程。
@@ -191,7 +211,7 @@ pub(super) async fn connect_with_retry(
                 config.max_backoff,
             );
             tracing::info!(attempt, ?backoff, "retrying initial connection...");
-            let _ = tx.send(TunnelEvent::Reconnecting { attempt }).await;
+            super::emit_event(tx, TunnelEvent::Reconnecting { attempt });
             tokio::time::sleep(backoff).await;
         } else {
             tracing::info!("connecting to host...");
@@ -245,5 +265,22 @@ async fn join_accept_loop(conn: Connection, listener: Arc<TcpListener>) -> crate
                 tracing::debug!(%peer, "stream closed: {e}");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_rejection_stops_retry() {
+        let err = crate::error::SculkError::Tunnel(crate::error::TunnelError::AuthRejectedByHost);
+        assert!(is_auth_rejected(&err));
+    }
+
+    #[test]
+    fn auth_timeout_can_retry() {
+        let err = crate::error::SculkError::Tunnel(crate::error::TunnelError::AuthTimedOut);
+        assert!(!is_auth_rejected(&err));
     }
 }

@@ -10,7 +10,7 @@ use iroh::endpoint::{
 };
 use iroh::{Endpoint, EndpointId};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use super::event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent};
@@ -39,6 +39,7 @@ const CLOSE_SERVER_FULL: VarInt = VarInt::from_u32(2);
 const CLOSE_REPLACED_BY_RECONNECT: VarInt = VarInt::from_u32(3);
 const REJECT_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 const FULL_RECHECK_DELAY: Duration = Duration::from_millis(1500);
+const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 pub(super) struct TrackedConnection {
@@ -133,28 +134,28 @@ impl IrohTunnel {
         let conns: Arc<Mutex<Vec<TrackedConnection>>> = Arc::new(Mutex::new(Vec::new()));
         let sessions: Arc<Mutex<HostSessions>> = Arc::new(Mutex::new(HostSessions::default()));
 
+        let (shutdown, shutdown_rx) = watch::channel(false);
         let ep = endpoint.clone();
         let conns_clone = conns.clone();
         let sessions_clone = sessions.clone();
         tokio::spawn(async move {
-            let ctx = HostContext {
+            let ctx = Arc::new(HostContext {
                 conns: conns_clone,
                 sessions: sessions_clone,
                 event_delay: config.event_delay,
                 password: config.password,
                 max_players: config.max_players,
-            };
-            if let Err(e) = host_accept_loop(ep, mc_port, tx.clone(), ctx).await {
-                let _ = tx
-                    .send(TunnelEvent::Error {
+            });
+            if let Err(e) = host_accept_loop(ep, mc_port, tx.clone(), ctx, shutdown_rx).await {
+                emit_event(
+                    &tx,
+                    TunnelEvent::Error {
                         message: format!("host loop ended: {e}"),
-                    })
-                    .await;
+                    },
+                );
             }
         });
 
-        // host 侧 accept loop 在 endpoint 关闭后自然退出，shutdown 信号仅占位
-        let (shutdown, _) = tokio::sync::watch::channel(false);
         Ok((
             Self {
                 endpoint,
@@ -184,7 +185,7 @@ impl IrohTunnel {
         let conn = connect_with_retry(&endpoint, ticket.endpoint_id, &config, &tx).await?;
 
         lock_mutex(&conns, "join connections")?.push(TrackedConnection::new(&conn));
-        let _ = tx.send(TunnelEvent::Connected).await;
+        emit_event(&tx, TunnelEvent::Connected);
 
         let listener = Arc::new(
             TcpListener::bind(("127.0.0.1", local_port))
@@ -197,7 +198,7 @@ impl IrohTunnel {
         let conns_clone = conns.clone();
         let endpoint_id = ticket.endpoint_id;
 
-        let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (shutdown, shutdown_rx) = watch::channel(false);
         tokio::spawn(async move {
             let ctx = JoinContext {
                 listener,
@@ -242,6 +243,21 @@ impl IrohTunnel {
     }
 }
 
+impl Drop for IrohTunnel {
+    fn drop(&mut self) {
+        let _ = self.shutdown.send(true);
+        if self.endpoint.is_closed() {
+            return;
+        }
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let endpoint = self.endpoint.clone();
+            runtime.spawn(async move {
+                endpoint.close().await;
+            });
+        }
+    }
+}
+
 pub(super) fn lock_mutex<'a, T>(
     mutex: &'a Arc<Mutex<T>>,
     name: &'static str,
@@ -249,4 +265,77 @@ pub(super) fn lock_mutex<'a, T>(
     mutex
         .lock()
         .map_err(|_| TunnelError::mutex_poisoned(name).into())
+}
+
+/// 尽力投递运行时事件；慢消费者不得阻塞网络控制流程。
+pub(super) fn emit_event(tx: &mpsc::Sender<TunnelEvent>, event: TunnelEvent) {
+    match tx.try_send(event) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(event)) => {
+            tracing::debug!(?event, "event channel full, dropping event");
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => {}
+    }
+}
+
+/// value 变为 true 或 sender 被丢弃时返回。
+pub(super) async fn wait_for_shutdown(rx: &mut watch::Receiver<bool>) {
+    if *rx.borrow() {
+        return;
+    }
+    let _ = rx.changed().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drops_event_when_full() {
+        let (tx, mut rx) = mpsc::channel(1);
+        emit_event(&tx, TunnelEvent::Connected);
+        emit_event(&tx, TunnelEvent::Reconnected);
+
+        assert!(matches!(rx.try_recv(), Ok(TunnelEvent::Connected)));
+        assert!(matches!(
+            rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn waits_for_shutdown() {
+        let (tx, mut rx) = watch::channel(false);
+        let sent = tx.send(true);
+        assert!(sent.is_ok(), "shutdown send failed");
+
+        wait_for_shutdown(&mut rx).await;
+        assert!(*rx.borrow());
+    }
+
+    #[tokio::test]
+    async fn drop_closes_endpoint() {
+        let endpoint = Endpoint::builder(iroh::endpoint::presets::N0DisableRelay)
+            .clear_address_lookup()
+            .bind()
+            .await;
+        assert!(endpoint.is_ok(), "test endpoint bind failed: {endpoint:?}");
+        let endpoint = if let Ok(endpoint) = endpoint {
+            endpoint
+        } else {
+            return;
+        };
+        let observer = endpoint.clone();
+        let (shutdown, _) = watch::channel(false);
+        let tunnel = IrohTunnel {
+            endpoint,
+            conns: Arc::new(Mutex::new(Vec::new())),
+            created_at: Instant::now(),
+            shutdown,
+        };
+
+        drop(tunnel);
+        let closed = tokio::time::timeout(Duration::from_secs(2), observer.closed()).await;
+        assert!(closed.is_ok(), "endpoint did not close after tunnel drop");
+    }
 }

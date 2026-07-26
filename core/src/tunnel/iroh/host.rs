@@ -7,6 +7,9 @@ use super::monitor::spawn_path_monitor;
 use super::session::HostSessions;
 use super::transport::bridge;
 
+const CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
+const CONNECTION_TASKS_MAX: usize = 128;
+
 /// Host 接受循环的运行时上下文。
 pub(super) struct HostContext {
     pub(super) conns: Arc<Mutex<Vec<TrackedConnection>>>,
@@ -21,163 +24,209 @@ pub(super) async fn host_accept_loop(
     endpoint: Endpoint,
     mc_port: u16,
     tx: mpsc::Sender<TunnelEvent>,
-    ctx: HostContext,
+    ctx: Arc<HostContext>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> crate::Result<()> {
+    let slots = Arc::new(tokio::sync::Semaphore::new(CONNECTION_TASKS_MAX));
+
     loop {
-        let conn = endpoint
-            .accept()
-            .await
-            .ok_or_else(|| {
-                crate::error::TunnelError::AcceptHostConnection("endpoint closed".into())
-            })?
-            .await
-            .map_err(|e| crate::error::TunnelError::AcceptHostConnection(e.into()))?;
-
-        let remote_endpoint_id = conn.remote_id();
-        let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
-        tracing::info!(remote = %remote_id, "player connected");
-
-        if !capacity_check_with_grace(ctx.sessions.clone(), remote_endpoint_id, ctx.max_players)
-            .await?
-        {
-            tracing::info!(remote = %remote_id, "server full, rejecting");
-            let _ = tx
-                .send(TunnelEvent::PlayerRejected {
-                    id: remote_id.clone(),
-                    reason: "server full".into(),
-                })
-                .await;
-            spawn_rejected_conn_cleanup(conn, CLOSE_SERVER_FULL, b"server full", remote_id);
-            continue;
-        }
-
-        if let Some(ref pwd) = ctx.password {
-            match auth_verify(&conn, pwd).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    tracing::info!(remote = %remote_id, "auth failed");
-                    let _ = tx
-                        .send(TunnelEvent::AuthFailed {
-                            id: remote_id.clone(),
-                        })
-                        .await;
-                    spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
-                    continue;
-                }
-                Err(e) => {
-                    tracing::warn!(remote = %remote_id, "auth error: {e}");
-                    let _ = tx
-                        .send(TunnelEvent::AuthFailed {
-                            id: remote_id.clone(),
-                        })
-                        .await;
-                    spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
-                    continue;
-                }
+        let accepting = tokio::select! {
+            _ = super::wait_for_shutdown(&mut shutdown) => return Ok(()),
+            accepting = endpoint.accept() => {
+                let Some(accepting) = accepting else {
+                    return Ok(());
+                };
+                accepting
             }
-        }
-
-        let (generation, is_reconnect, old_conn) = {
-            let mut guard = super::lock_mutex(&ctx.sessions, "host sessions")?;
-            guard.upsert(remote_endpoint_id, conn.clone())
         };
-        if let Some(old_conn) = old_conn {
-            old_conn.close(CLOSE_REPLACED_BY_RECONNECT, b"replaced by reconnect");
-        }
-
-        let conn_handle = conn.weak_handle();
-        super::lock_mutex(&ctx.conns, "host connections")?.push(TrackedConnection::new(&conn));
-
-        if is_reconnect {
-            tracing::info!(remote = %remote_id, "player reconnected");
-        } else {
-            let _ = tx
-                .send(TunnelEvent::PlayerJoined {
-                    id: remote_id.clone(),
-                })
-                .await;
-        }
-
-        spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone(), ctx.event_delay);
-
-        let tx_left = tx.clone();
-        let left_id = remote_id.clone();
-        let sessions_on_close = ctx.sessions.clone();
+        let permit = tokio::select! {
+            _ = super::wait_for_shutdown(&mut shutdown) => return Ok(()),
+            permit = slots.clone().acquire_owned() => {
+                permit.map_err(|e| {
+                    crate::error::TunnelError::AcceptHostConnection(e.into())
+                })?
+            }
+        };
+        let tx = tx.clone();
+        let ctx = ctx.clone();
         tokio::spawn(async move {
-            let reason = match conn_handle.closed().await {
-                Some(closed) => closed.reason.to_string(),
-                None => "connection closed".to_string(),
-            };
-            let mut lock_error = None;
-            let should_emit_left = match super::lock_mutex(&sessions_on_close, "host sessions") {
-                Ok(mut guard) => guard.remove_if_current(&remote_endpoint_id, generation),
-                Err(e) => {
-                    lock_error = Some(e);
-                    false
+            let _permit = permit;
+            let conn = match tokio::time::timeout(CONNECTION_ACCEPT_TIMEOUT, accepting).await {
+                Ok(Ok(conn)) => conn,
+                Ok(Err(e)) => {
+                    super::emit_event(
+                        &tx,
+                        TunnelEvent::Error {
+                            message: format!("accept host connection failed: {e}"),
+                        },
+                    );
+                    return;
+                }
+                Err(_) => {
+                    super::emit_event(
+                        &tx,
+                        TunnelEvent::Error {
+                            message: "accept host connection timed out".to_string(),
+                        },
+                    );
+                    return;
                 }
             };
-            if let Some(e) = lock_error {
-                let _ = tx_left
-                    .send(TunnelEvent::Error {
-                        message: e.to_string(),
-                    })
-                    .await;
-            }
-            if should_emit_left {
-                let _ = tx_left
-                    .send(TunnelEvent::PlayerLeft {
-                        id: left_id,
-                        reason,
-                    })
-                    .await;
-            } else {
-                tracing::debug!(remote = %left_id, "stale connection closed, ignored");
-            }
-        });
-
-        tokio::spawn(async move {
-            if let Err(e) = host_handle_conn(conn, mc_port).await {
-                tracing::debug!("connection ended: {e}");
+            if let Err(e) = start_host_connection(conn, mc_port, &tx, &ctx).await {
+                super::emit_event(
+                    &tx,
+                    TunnelEvent::Error {
+                        message: format!("start host connection failed: {e}"),
+                    },
+                );
             }
         });
     }
 }
 
-/// 满员时短暂复核，避免重连误拒绝。
-async fn capacity_check_with_grace(
-    sessions: Arc<Mutex<HostSessions>>,
-    incoming_id: EndpointId,
-    max_players: Option<u32>,
-) -> crate::Result<bool> {
-    capacity_check_with_grace_delay(sessions, incoming_id, max_players, FULL_RECHECK_DELAY).await
-}
+async fn start_host_connection(
+    conn: Connection,
+    mc_port: u16,
+    tx: &mpsc::Sender<TunnelEvent>,
+    ctx: &HostContext,
+) -> crate::Result<()> {
+    let remote_endpoint_id = conn.remote_id();
+    let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
+    tracing::info!(remote = %remote_id, "player connected");
 
-async fn capacity_check_with_grace_delay(
-    sessions: Arc<Mutex<HostSessions>>,
-    incoming_id: EndpointId,
-    max_players: Option<u32>,
-    recheck_delay: Duration,
-) -> crate::Result<bool> {
-    let Some(max) = max_players else {
-        return Ok(true);
-    };
-
-    let has_capacity_or_reconnect = |guard: &HostSessions| {
-        guard.contains(&incoming_id)
-            || u32::try_from(guard.active_players()).unwrap_or(u32::MAX) < max
-    };
-
-    {
-        let guard = super::lock_mutex(&sessions, "host sessions")?;
-        if has_capacity_or_reconnect(&guard) {
-            return Ok(true);
+    if let Some(ref password) = ctx.password {
+        match auth_verify(&conn, password).await {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::info!(remote = %remote_id, "auth failed");
+                super::emit_event(
+                    tx,
+                    TunnelEvent::AuthFailed {
+                        id: remote_id.clone(),
+                    },
+                );
+                spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!(remote = %remote_id, "auth error: {e}");
+                super::emit_event(
+                    tx,
+                    TunnelEvent::AuthFailed {
+                        id: remote_id.clone(),
+                    },
+                );
+                spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
+                return Ok(());
+            }
         }
     }
 
-    tokio::time::sleep(recheck_delay).await;
+    let Some((generation, is_reconnect, old_conn)) = register_session_with_grace(
+        ctx.sessions.clone(),
+        remote_endpoint_id,
+        conn.clone(),
+        ctx.max_players,
+    )
+    .await?
+    else {
+        tracing::info!(remote = %remote_id, "server full, rejecting");
+        super::emit_event(
+            tx,
+            TunnelEvent::PlayerRejected {
+                id: remote_id.clone(),
+                reason: "server full".into(),
+            },
+        );
+        spawn_rejected_conn_cleanup(conn, CLOSE_SERVER_FULL, b"server full", remote_id);
+        return Ok(());
+    };
+    if let Some(old_conn) = old_conn {
+        old_conn.close(CLOSE_REPLACED_BY_RECONNECT, b"replaced by reconnect");
+    }
 
-    let guard = super::lock_mutex(&sessions, "host sessions")?;
-    Ok(has_capacity_or_reconnect(&guard))
+    let conn_handle = conn.weak_handle();
+    super::lock_mutex(&ctx.conns, "host connections")?.push(TrackedConnection::new(&conn));
+
+    if is_reconnect {
+        tracing::info!(remote = %remote_id, "player reconnected");
+    } else {
+        super::emit_event(
+            tx,
+            TunnelEvent::PlayerJoined {
+                id: remote_id.clone(),
+            },
+        );
+    }
+
+    spawn_path_monitor(conn.clone(), remote_id.clone(), tx.clone(), ctx.event_delay);
+
+    let tx_left = tx.clone();
+    let left_id = remote_id.clone();
+    let sessions_on_close = ctx.sessions.clone();
+    tokio::spawn(async move {
+        let reason = match conn_handle.closed().await {
+            Some(closed) => closed.reason.to_string(),
+            None => "connection closed".to_string(),
+        };
+        let mut lock_error = None;
+        let should_emit_left = match super::lock_mutex(&sessions_on_close, "host sessions") {
+            Ok(mut guard) => guard.remove_if_current(&remote_endpoint_id, generation),
+            Err(e) => {
+                lock_error = Some(e);
+                false
+            }
+        };
+        if let Some(e) = lock_error {
+            super::emit_event(
+                &tx_left,
+                TunnelEvent::Error {
+                    message: e.to_string(),
+                },
+            );
+        }
+        if should_emit_left {
+            super::emit_event(
+                &tx_left,
+                TunnelEvent::PlayerLeft {
+                    id: left_id,
+                    reason,
+                },
+            );
+        } else {
+            tracing::debug!(remote = %left_id, "stale connection closed, ignored");
+        }
+    });
+
+    tokio::spawn(async move {
+        if let Err(e) = host_handle_conn(conn, mc_port).await {
+            tracing::debug!("connection ended: {e}");
+        }
+    });
+    Ok(())
+}
+
+/// 原子检查容量并注册会话；满员时短暂复核一次。
+async fn register_session_with_grace(
+    sessions: Arc<Mutex<HostSessions>>,
+    incoming_id: EndpointId,
+    conn: Connection,
+    max_players: Option<u32>,
+) -> crate::Result<Option<(u64, bool, Option<Connection>)>> {
+    {
+        let mut guard = super::lock_mutex(&sessions, "host sessions")?;
+        if guard.has_capacity_for(&incoming_id, max_players) {
+            return Ok(Some(guard.upsert(incoming_id, conn)));
+        }
+    }
+
+    tokio::time::sleep(FULL_RECHECK_DELAY).await;
+
+    let mut guard = super::lock_mutex(&sessions, "host sessions")?;
+    if !guard.has_capacity_for(&incoming_id, max_players) {
+        return Ok(None);
+    }
+    Ok(Some(guard.upsert(incoming_id, conn)))
 }
 
 /// 拒绝连接后异步 close 并等待收敛。
@@ -216,58 +265,5 @@ async fn host_handle_conn(conn: Connection, mc_port: u16) -> crate::Result<()> {
                 tracing::debug!("stream closed: {e}");
             }
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_endpoint_id() -> EndpointId {
-        let bytes: [u8; 32] = rand::random();
-        iroh::SecretKey::from_bytes(&bytes).public()
-    }
-
-    #[tokio::test]
-    async fn capacity_allows_reconnect_when_full() {
-        let endpoint_id = test_endpoint_id();
-        let sessions = Arc::new(Mutex::new(HostSessions::default()));
-        {
-            let lock_res = sessions.lock();
-            assert!(lock_res.is_ok(), "host sessions lock poisoned");
-            if let Ok(mut guard) = lock_res {
-                guard.insert_for_test(endpoint_id, 1);
-            } else {
-                return;
-            }
-        }
-
-        let allowed_res =
-            capacity_check_with_grace_delay(sessions, endpoint_id, Some(1), Duration::ZERO).await;
-        assert!(allowed_res.is_ok(), "capacity check failed");
-        let allowed = if let Ok(v) = allowed_res { v } else { return };
-        assert!(allowed);
-    }
-
-    #[tokio::test]
-    async fn capacity_rejects_new_player_when_full() {
-        let existing = test_endpoint_id();
-        let incoming = test_endpoint_id();
-        let sessions = Arc::new(Mutex::new(HostSessions::default()));
-        {
-            let lock_res = sessions.lock();
-            assert!(lock_res.is_ok(), "host sessions lock poisoned");
-            if let Ok(mut guard) = lock_res {
-                guard.insert_for_test(existing, 1);
-            } else {
-                return;
-            }
-        }
-
-        let allowed_res =
-            capacity_check_with_grace_delay(sessions, incoming, Some(1), Duration::ZERO).await;
-        assert!(allowed_res.is_ok(), "capacity check failed");
-        let allowed = if let Ok(v) = allowed_res { v } else { return };
-        assert!(!allowed);
     }
 }

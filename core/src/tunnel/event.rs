@@ -129,6 +129,8 @@ impl Default for JoinConfig {
 ///
 /// host 侧接收玩家连接/断开/拒绝事件，join 侧接收连接/重连/断开事件，
 /// 双端均可收到 `PathChanged` 和 `Error`。
+///
+/// 事件为有界、尽力投递；消费者落后时，新事件可能被丢弃，但网络控制流程不会被阻塞。
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum TunnelEvent {
@@ -154,7 +156,7 @@ pub enum TunnelEvent {
     AuthFailed { id: PeerId },
     /// host 侧：连接被主动拒绝，如服务器满员时 `reason` 为 `"server full"`。
     PlayerRejected { id: PeerId, reason: String },
-    /// 非致命的内部或 I/O 错误，隧道仍在运行。
+    /// 内部或 I/O 错误；`message` 会说明受影响的运行流程。
     Error { message: String },
 }
 

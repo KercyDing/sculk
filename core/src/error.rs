@@ -124,6 +124,9 @@ pub enum TunnelError {
     /// 认证被 host 拒绝。
     #[error("auth rejected by host")]
     AuthRejectedByHost,
+    /// 认证握手超时。
+    #[error("auth handshake timed out")]
+    AuthTimedOut,
     /// 桥接 tcp->quic 失败。
     #[error("bridge tcp->quic failed")]
     BridgeTcpToQuic(#[source] BoxError),

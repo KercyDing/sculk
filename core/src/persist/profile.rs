@@ -1,6 +1,9 @@
 //! 用户偏好 Profile，以 TOML 格式持久化到 `{data_dir}/sculk/profile.toml`。
 
-use std::path::Path;
+use std::ffi::OsString;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +12,7 @@ use crate::Result;
 use crate::error::PersistError;
 
 const PROFILE_FILE: &str = "profile.toml";
+const TEMP_CREATE_ATTEMPTS_MAX: usize = 16;
 
 /// 用户偏好配置根结构，序列化为 `profile.toml`。
 ///
@@ -93,16 +97,22 @@ impl Profile {
 
     /// 从指定路径加载配置。文件不存在时写入默认值。
     pub fn load_from(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            let profile = Self::default();
-            profile.save_to(path)?;
-            return Ok(profile);
-        }
-        let content = std::fs::read_to_string(path).map_err(|e| PersistError::PathIo {
-            op: "read profile",
-            path: path.to_path_buf(),
-            source: e,
-        })?;
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                let profile = Self::default();
+                profile.save_to(path)?;
+                return Ok(profile);
+            }
+            Err(source) => {
+                return Err(PersistError::PathIo {
+                    op: "read profile",
+                    path: path.to_path_buf(),
+                    source,
+                }
+                .into());
+            }
+        };
         let profile: Self = toml::from_str(&content).map_err(|e| PersistError::ProfileParse {
             path: path.to_path_buf(),
             source: e,
@@ -118,20 +128,8 @@ impl Profile {
 
     /// 保存配置到指定路径。
     pub fn save_to(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| PersistError::PathIo {
-                op: "create config dir",
-                path: parent.to_path_buf(),
-                source: e,
-            })?;
-        }
         let content = toml::to_string_pretty(self).map_err(PersistError::ProfileSerialize)?;
-        std::fs::write(path, content).map_err(|e| PersistError::PathIo {
-            op: "write profile",
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-        Ok(())
+        write_profile_atomic(path, content.as_bytes())
     }
 
     /// 解析最终使用的 relay URL，优先级从高到低：
@@ -159,12 +157,128 @@ impl Profile {
     }
 }
 
+fn write_profile_atomic(path: &Path, content: &[u8]) -> Result<()> {
+    let parent = parent_dir(path);
+    std::fs::create_dir_all(parent).map_err(|source| PersistError::PathIo {
+        op: "create config dir",
+        path: parent.to_path_buf(),
+        source,
+    })?;
+
+    for _ in 0..TEMP_CREATE_ATTEMPTS_MAX {
+        let temp_path = temp_path(path);
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => file,
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(source) => {
+                return Err(PersistError::PathIo {
+                    op: "create temporary profile",
+                    path: temp_path,
+                    source,
+                }
+                .into());
+            }
+        };
+        let temp = TempProfile { path: temp_path };
+        file.write_all(content)
+            .map_err(|source| PersistError::PathIo {
+                op: "write temporary profile",
+                path: temp.path.clone(),
+                source,
+            })?;
+        file.sync_all().map_err(|source| PersistError::PathIo {
+            op: "sync temporary profile",
+            path: temp.path.clone(),
+            source,
+        })?;
+        std::fs::rename(temp.path(), path).map_err(|source| PersistError::PathIo {
+            op: "replace profile",
+            path: path.to_path_buf(),
+            source,
+        })?;
+        return sync_parent(path);
+    }
+
+    Err(PersistError::PathIo {
+        op: "create temporary profile",
+        path: path.to_path_buf(),
+        source: std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "temporary profile name collision limit reached",
+        ),
+    }
+    .into())
+}
+
+fn parent_dir(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn temp_path(path: &Path) -> PathBuf {
+    let mut name = OsString::from(".");
+    name.push(
+        path.file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new(PROFILE_FILE)),
+    );
+    name.push(format!(".{:016x}.tmp", rand::random::<u64>()));
+    parent_dir(path).join(name)
+}
+
+fn sync_parent(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = parent_dir(path);
+        std::fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|source| PersistError::PathIo {
+                op: "sync config directory",
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+
+    #[cfg(not(unix))]
+    let _ = path;
+
+    Ok(())
+}
+
+struct TempProfile {
+    path: PathBuf,
+}
+
+impl TempProfile {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempProfile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn test_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "sculk_profile_{name}_{}_{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ))
+    }
+
     #[test]
-    fn default_profile_values() {
+    fn default_values() {
         let p = Profile::default();
         assert_eq!(p.host.port, crate::DEFAULT_MC_PORT);
         assert_eq!(p.join.port, crate::DEFAULT_INLET_PORT);
@@ -174,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_toml() {
+    fn toml_roundtrip() {
         let mut p = Profile::default();
         p.host.port = 12345;
         p.join.last_ticket = Some("sculk://test".to_string());
@@ -195,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_toml_uses_defaults() {
+    fn partial_uses_defaults() {
         let s = "[host]\nport = 9999\n";
         let p_res: std::result::Result<Profile, toml::de::Error> = toml::from_str(s);
         assert!(p_res.is_ok(), "deserialize partial profile failed");
@@ -206,9 +320,8 @@ mod tests {
     }
 
     #[test]
-    fn save_and_load_file() {
-        let dir = std::env::temp_dir().join("sculk_test_profile");
-        let _ = std::fs::remove_dir_all(&dir);
+    fn file_roundtrip() {
+        let dir = test_dir("save_load");
         let path = dir.join("profile.toml");
 
         let mut p = Profile::default();
@@ -221,20 +334,30 @@ mod tests {
         let loaded = if let Ok(v) = loaded_res { v } else { return };
         assert_eq!(loaded.host.port, 11111);
 
+        p.host.port = 22222;
+        let replace_res = p.save_to(&path);
+        assert!(replace_res.is_ok(), "replace profile failed");
+        let replaced_res = Profile::load_from(&path);
+        assert!(replaced_res.is_ok(), "load replaced profile failed");
+        let replaced = if let Ok(v) = replaced_res {
+            v
+        } else {
+            return;
+        };
+        assert_eq!(replaced.host.port, 22222);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn load_missing_file_creates_default() {
-        let dir = std::env::temp_dir().join("sculk_test_load_missing");
-        let _ = std::fs::remove_dir_all(&dir);
+    fn missing_creates_default() {
+        let dir = test_dir("missing");
         let path = dir.join("profile.toml");
 
         let p_res = Profile::load_from(&path);
         assert!(p_res.is_ok(), "load missing profile failed");
         let p = if let Ok(v) = p_res { v } else { return };
         assert_eq!(p.host.port, crate::DEFAULT_MC_PORT);
-        // 文件应该已被创建
         assert!(path.exists());
 
         let _ = std::fs::remove_dir_all(&dir);

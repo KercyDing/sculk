@@ -22,10 +22,17 @@ pub(super) async fn bridge(
             let _ = send.finish();
             r.map_err(|e| crate::error::TunnelError::BridgeTcpToQuic(e.into()))?;
             // TCP->QUIC 方向结束，等待 QUIC->TCP 方向排空
-            let _ = tokio::time::timeout(
+            match tokio::time::timeout(
                 DRAIN_TIMEOUT,
                 tokio::io::copy(&mut recv, &mut tcp_write),
-            ).await;
+            ).await {
+                Ok(result) => {
+                    result.map_err(|e| {
+                        crate::error::TunnelError::BridgeQuicToTcp(e.into())
+                    })?;
+                }
+                Err(_) => tracing::debug!("quic->tcp drain timed out"),
+            }
         }
         r = tokio::io::copy(&mut recv, &mut tcp_write) => {
             r.map_err(|e| crate::error::TunnelError::BridgeQuicToTcp(e.into()))?;
@@ -35,7 +42,14 @@ pub(super) async fn bridge(
                 tokio::io::copy(&mut tcp_read, &mut send),
             ).await;
             let _ = send.finish();
-            let _ = drain;
+            match drain {
+                Ok(result) => {
+                    result.map_err(|e| {
+                        crate::error::TunnelError::BridgeTcpToQuic(e.into())
+                    })?;
+                }
+                Err(_) => tracing::debug!("tcp->quic drain timed out"),
+            }
         }
     }
 
