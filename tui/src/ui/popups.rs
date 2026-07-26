@@ -1,4 +1,4 @@
-//! 帮助弹窗、编辑弹窗与 centered_rect 工具。
+//! 弹窗渲染。
 
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -6,12 +6,12 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-/// 单个字符的显示列宽，控制字符视为 0。
+/// 返回字符占用的终端列数。
 fn char_width(ch: char) -> usize {
     unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
 }
 
-/// 按显示宽度从 `s` 的指定字节偏移开始截取，返回 `(end_byte, 实际显示宽度)`。
+/// 按终端显示宽度查找 UTF-8 切片的结束位置。
 fn slice_by_width(s: &str, start: usize, max_width: usize) -> (usize, usize) {
     let mut end = start;
     let mut width = 0;
@@ -26,23 +26,22 @@ fn slice_by_width(s: &str, start: usize, max_width: usize) -> (usize, usize) {
     (end, width)
 }
 
-use super::theme::{ACCENT, BG, INFO, WARN};
-use crate::state::{AppState, HelpLineSpec};
+use super::{ACCENT, BG, INFO, WARN};
+use crate::model::{ActiveTab, HostField, InputMode, JoinField, Model};
 
-/// 清空弹窗区域，左右各多清 1 列以断开跨边界的 CJK 双宽字符。
+/// 在两侧各多清除一列，避免残留被弹窗截断的宽字符。
 fn clear_popup(frame: &mut ratatui::Frame<'_>, popup: Rect) {
     let total_w = frame.area().width;
     let x = popup.x.saturating_sub(1);
     let w = (popup.width + 2).min(total_w.saturating_sub(x));
     let expanded = Rect::new(x, popup.y, w, popup.height);
     frame.render_widget(Clear, expanded);
-    // 用主背景色填充扩展区域，使多清的列与周围 UI 融合
+    // 使用应用背景色重新填充扩展区域。
     frame.render_widget(Block::default().style(Style::default().bg(BG)), expanded);
 }
 
-pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
-    let spec = state.help_popup_spec();
-    if !spec.show {
+pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model) {
+    if !model.show_help {
         return;
     }
 
@@ -60,31 +59,43 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     let key_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
     let sep = Style::default().fg(ratatui::style::Color::DarkGray);
 
-    let mut lines = Vec::new();
-    for line in spec.lines {
-        match line {
-            HelpLineSpec::Title(text) => lines.push(Line::from(Span::styled(
-                text,
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ))),
-            HelpLineSpec::Empty => lines.push(Line::raw("")),
-            HelpLineSpec::Shortcut { key, description } => lines.push(Line::from(vec![
-                Span::styled(key, key_style),
-                Span::styled(" — ", sep),
-                Span::raw(description),
-            ])),
-            HelpLineSpec::Raw(text) => lines.push(Line::raw(text)),
-        }
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "SCULK TUI 快捷键",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+    ];
+    for (key, description) in [
+        ("Enter", "执行当前模式"),
+        ("←/→", "切换模式"),
+        ("Tab", "切换焦点"),
+        ("↑/↓", "字段/中继/日志"),
+        ("i", "进入编辑"),
+        ("Esc", "退出编辑"),
+        ("c", "清空日志"),
+        ("h", "开关帮助"),
+        ("Esc×2", "退出程序"),
+    ] {
+        lines.push(Line::from(vec![
+            Span::styled(key, key_style),
+            Span::styled(" — ", sep),
+            Span::raw(description),
+        ]));
     }
+    lines.extend([
+        Line::raw(""),
+        Line::raw("建房 Enter 启动/停止隧道，"),
+        Line::raw("票据自动复制到剪贴板。"),
+    ]);
 
     let help = Paragraph::new(Text::from(lines));
     frame.render_widget(help, popup.inner(Margin::new(2, 1)));
 }
 
-/// 中止隧道确认弹窗。
-pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
-    let spec = state.confirm_stop_popup_spec();
-    if !spec.show {
+/// 渲染停止确认弹窗。
+pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model) {
+    if !model.confirm_stop {
         return;
     }
 
@@ -122,7 +133,10 @@ pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, sta
     .split(inner);
 
     frame.render_widget(
-        Paragraph::new(Span::styled(spec.prompt, Style::default().fg(Color::White))),
+        Paragraph::new(Span::styled(
+            "确认停止当前隧道？",
+            Style::default().fg(Color::White),
+        )),
         rows[0],
     );
     frame.render_widget(
@@ -142,10 +156,10 @@ pub fn render_confirm_stop_popup(frame: &mut ratatui::Frame<'_>, area: Rect, sta
     );
 }
 
-/// 在给定区域内生成居中矩形。
+/// 返回在指定区域内居中的固定尺寸矩形。
 pub fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     let clamped_w = width.min(area.width);
-    // 强制偶数宽度
+    // 偶数宽度可以让弹窗边缘的 CJK 字符边界保持稳定。
     let w = clamped_w & !1;
     let h = height.min(area.height);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -153,14 +167,14 @@ pub fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, h)
 }
 
-/// 编辑弹窗。
-pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &AppState) {
-    let spec = state.edit_popup_spec();
-    if !spec.show {
+/// 渲染当前输入编辑器。
+pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model) {
+    if model.input_mode != InputMode::Editing {
         return;
     }
 
-    let popup_h = (spec.fields.len() * 3 + 4) as u16;
+    let (title, fields) = edit_fields(model);
+    let popup_h = (fields.len() * 3 + 4) as u16;
 
     let vert = Layout::vertical([
         Constraint::Fill(1),
@@ -180,7 +194,7 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     clear_popup(frame, popup);
 
     let block = Block::default()
-        .title(spec.title)
+        .title(title)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(Style::default().bg(BG))
@@ -190,7 +204,7 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     let inner = popup.inner(Margin::new(2, 1));
 
     let mut constraints = vec![Constraint::Length(1)];
-    for _ in &spec.fields {
+    for _ in &fields {
         constraints.push(Constraint::Length(1));
         constraints.push(Constraint::Length(1));
         constraints.push(Constraint::Length(1));
@@ -198,7 +212,7 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
     constraints.push(Constraint::Length(1));
     let rows = Layout::vertical(constraints).split(inner);
 
-    for (i, field) in spec.fields.iter().enumerate() {
+    for (i, field) in fields.iter().enumerate() {
         let base = 1 + i * 3;
         let label_row = rows[base];
         let value_row = rows[base + 1];
@@ -218,11 +232,11 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         let (display, cursor_offset) = if field.active {
             let before_cursor = &field.value[..field.cursor];
             let cursor_width = UnicodeWidthStr::width(before_cursor);
-            let full_width = UnicodeWidthStr::width(field.value.as_str());
+            let full_width = UnicodeWidthStr::width(field.value);
             if full_width == 0 {
                 (" ".to_string(), 0usize)
             } else if cursor_width >= max_w {
-                // 光标超出视口右侧——从视口起始偏移开始裁剪
+                // 光标越过右边缘时滚动视口。
                 let mut start_byte = 0;
                 let mut acc_width = 0;
                 let target = cursor_width.saturating_sub(max_w);
@@ -234,24 +248,24 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
                     acc_width += w;
                     start_byte = i + ch.len_utf8();
                 }
-                let (end_byte, _) = slice_by_width(&field.value, start_byte, max_w);
+                let (end_byte, _) = slice_by_width(field.value, start_byte, max_w);
                 let s = field.value[start_byte..end_byte].to_string();
                 let prefix_w = UnicodeWidthStr::width(&field.value[start_byte..field.cursor]);
                 (s, prefix_w)
             } else {
-                // 光标在视口内，从头裁剪
-                let (end_byte, _) = slice_by_width(&field.value, 0, max_w);
+                // 光标仍可见时保持视口起点不变。
+                let (end_byte, _) = slice_by_width(field.value, 0, max_w);
                 let s = field.value[..end_byte].to_string();
                 (s, cursor_width)
             }
         } else if field.value.is_empty() {
             ("(空)".to_string(), 0)
         } else {
-            let full_width = UnicodeWidthStr::width(field.value.as_str());
+            let full_width = UnicodeWidthStr::width(field.value);
             if full_width <= max_w {
-                (field.value.clone(), 0)
+                (field.value.to_string(), 0)
             } else {
-                let (end_byte, _) = slice_by_width(&field.value, 0, max_w.saturating_sub(1));
+                let (end_byte, _) = slice_by_width(field.value, 0, max_w.saturating_sub(1));
                 let mut s = field.value[..end_byte].to_string();
                 s.push('…');
                 (s, 0)
@@ -276,12 +290,73 @@ pub fn render_edit_popup(frame: &mut ratatui::Frame<'_>, area: Rect, state: &App
         }
     }
 
-    let hint_row = rows[1 + spec.fields.len() * 3];
+    let hint_row = rows[1 + fields.len() * 3];
     frame.render_widget(
         Paragraph::new(Span::styled(
-            spec.hint,
+            "[↑/↓] 切换字段  [Esc] 保存",
             Style::default().fg(Color::DarkGray),
         )),
         hint_row,
     );
+}
+
+struct EditField<'a> {
+    label: &'static str,
+    value: &'a str,
+    cursor: usize,
+    active: bool,
+}
+
+fn edit_fields(model: &Model) -> (&'static str, Vec<EditField<'_>>) {
+    match model.tab {
+        ActiveTab::Host => (
+            "编辑 · 建房配置",
+            vec![
+                EditField {
+                    label: model.host_port.label,
+                    value: &model.host_port.value,
+                    cursor: model.host_port.cursor,
+                    active: model.host_field == HostField::Port,
+                },
+                EditField {
+                    label: model.host_password.label,
+                    value: &model.host_password.value,
+                    cursor: model.host_password.cursor,
+                    active: model.host_field == HostField::Password,
+                },
+            ],
+        ),
+        ActiveTab::Join => (
+            "编辑 · 加入配置",
+            vec![
+                EditField {
+                    label: model.join_ticket.label,
+                    value: &model.join_ticket.value,
+                    cursor: model.join_ticket.cursor,
+                    active: model.join_field == JoinField::Ticket,
+                },
+                EditField {
+                    label: model.join_port.label,
+                    value: &model.join_port.value,
+                    cursor: model.join_port.cursor,
+                    active: model.join_field == JoinField::Port,
+                },
+                EditField {
+                    label: model.join_password.label,
+                    value: &model.join_password.value,
+                    cursor: model.join_password.cursor,
+                    active: model.join_field == JoinField::Password,
+                },
+            ],
+        ),
+        ActiveTab::Relay => (
+            "编辑 · 中继 URL",
+            vec![EditField {
+                label: model.relay_url.label,
+                value: &model.relay_url.value,
+                cursor: model.relay_url.cursor,
+                active: true,
+            }],
+        ),
+    }
 }

@@ -1,9 +1,9 @@
-//! 单行文本输入组件。
+//! 单行文本编辑。
 
-/// 输入值最大字节长度，防止异常输入耗尽内存。
+/// 输入内容的最大字节数。
 const INPUT_MAX_BYTES: usize = 4096;
 
-/// 单行文本输入字段。
+/// 可编辑的单行输入框。
 pub struct InputField {
     pub value: String,
     pub(crate) cursor: usize,
@@ -136,7 +136,7 @@ mod tests {
         f.insert('好');
         assert_eq!(f.value, "你好");
         f.move_left();
-        assert_eq!(f.cursor, 3); // '你' is 3 bytes
+        assert_eq!(f.cursor, 3); // “你”的 UTF-8 编码占 3 字节
         f.backspace();
         assert_eq!(f.value, "好");
     }

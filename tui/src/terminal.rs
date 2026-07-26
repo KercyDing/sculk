@@ -1,4 +1,4 @@
-//! 终端生命周期服务：进入/退出 raw mode 与 alternate screen。
+//! 终端会话生命周期。
 
 use std::io;
 
@@ -9,19 +9,16 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-/// 应用终端类型别名。
+/// 应用使用的终端类型。
 pub type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
-/// 终端会话守卫：构造时进入 TUI 模式，释放时恢复终端。
+/// 释放时恢复终端状态。
 pub struct TerminalSession {
     terminal: AppTerminal,
 }
 
 impl TerminalSession {
-    /// 进入终端会话。
-    ///
-    /// Purpose: 启动 TUI 前初始化 raw mode 与 alternate screen。
-    /// Edge Cases: raw mode 开启后若后续步骤失败，会先恢复 raw mode 再返回错误。
+    /// 进入原始模式和备用屏幕。
     pub fn enter() -> anyhow::Result<Self> {
         enable_raw_mode()?;
         match Self::enter_inner() {
@@ -33,7 +30,7 @@ impl TerminalSession {
         }
     }
 
-    /// raw mode 已开启后的初始化步骤。
+    /// 在启用原始模式后完成初始化。
     fn enter_inner() -> anyhow::Result<Self> {
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
@@ -44,11 +41,6 @@ impl TerminalSession {
     }
 
     /// 绘制一帧。
-    ///
-    /// Purpose: 暴露最小绘制接口，避免在调用方长期借用终端引用。
-    /// Args: `f` 为单帧渲染闭包。
-    /// Returns: 绘制成功返回 `Ok(())`。
-    /// Edge Cases: 底层 IO 失败时返回错误。
     pub fn draw<F>(&mut self, f: F) -> anyhow::Result<()>
     where
         F: FnOnce(&mut ratatui::Frame<'_>),

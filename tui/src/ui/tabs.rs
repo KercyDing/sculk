@@ -1,21 +1,21 @@
-//! 左侧面板：Tab 选择 + Host/Join/Relay 输入字段。
+//! 建房、加入和中继标签页渲染。
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Tabs};
 
-use super::theme::{ACCENT, BG, INFO, WARN, border_style};
-use crate::state::{AppState, PanelSpec};
+use super::{ACCENT, BG, INFO, WARN, border_style};
+use crate::model::{ActiveTab, FocusPane, HostField, JoinField, Model, RELAYS, TAB_TITLES};
 
-pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppState) {
+pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model) {
     frame.render_widget(Block::default().style(Style::default().bg(BG)), area);
 
     let sections = Layout::vertical([Constraint::Length(3), Constraint::Min(8)]).split(area);
-    let spec = state.tabs_spec();
+    let focused = model.focus == FocusPane::Profile;
 
-    let tabs = Tabs::new(*spec.titles)
-        .select(spec.selected_tab)
+    let tabs = Tabs::new(TAB_TITLES)
+        .select(model.tab.index())
         .style(Style::default().fg(Color::Gray).bg(BG))
         .highlight_style(
             Style::default()
@@ -29,37 +29,33 @@ pub fn render_left(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut AppSt
                 .title("模式")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(border_style(spec.profile_focused))
+                .border_style(border_style(focused))
                 .style(Style::default().bg(BG)),
         );
     frame.render_widget(tabs, sections[0]);
 
+    let title = match model.tab {
+        ActiveTab::Host => "建房配置",
+        ActiveTab::Join => "加入配置",
+        ActiveTab::Relay => "中继列表",
+    };
     let panel_block = Block::default()
-        .title(spec.panel_title)
+        .title(title)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(border_style(spec.profile_focused))
+        .border_style(border_style(focused))
         .style(Style::default().bg(BG));
     let inner = panel_block.inner(sections[1]);
     frame.render_widget(panel_block, sections[1]);
 
-    match spec.panel {
-        PanelSpec::Host { fields, hint } => render_host_fields(frame, inner, fields, hint),
-        PanelSpec::Join { fields, hint } => render_join_fields(frame, inner, fields, hint),
-        PanelSpec::Relay {
-            options,
-            relay_url,
-            hint,
-        } => render_relay_fields(frame, inner, options, relay_url, hint),
+    match model.tab {
+        ActiveTab::Host => render_host_fields(frame, inner, model, focused),
+        ActiveTab::Join => render_join_fields(frame, inner, model, focused),
+        ActiveTab::Relay => render_relay_fields(frame, inner, model, focused),
     }
 }
 
-fn render_host_fields(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    fields: Vec<crate::state::FieldSpec>,
-    hint: &'static str,
-) {
+fn render_host_fields(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model, focused: bool) {
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -85,28 +81,31 @@ fn render_host_fields(
         rows[0],
     );
 
-    if let Some(field) = fields.first() {
-        render_field_line(frame, rows[2], field.label, &field.value, field.selected);
-    }
-    if let Some(field) = fields.get(1) {
-        render_field_line(frame, rows[3], field.label, &field.value, field.selected);
-    }
+    render_field_line(
+        frame,
+        rows[2],
+        model.host_port.label,
+        &model.host_port.value,
+        focused && model.host_field == HostField::Port,
+    );
+    render_field_line(
+        frame,
+        rows[3],
+        model.host_password.label,
+        &model.host_password.value,
+        focused && model.host_field == HostField::Password,
+    );
 
     frame.render_widget(
         Paragraph::new(Span::styled(
-            hint,
+            "i 编辑 | ↑/↓ 切换字段",
             Style::default().fg(Color::DarkGray).bg(BG),
         )),
         rows[5],
     );
 }
 
-fn render_join_fields(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    fields: Vec<crate::state::FieldSpec>,
-    hint: &'static str,
-) {
+fn render_join_fields(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model, focused: bool) {
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -133,32 +132,38 @@ fn render_join_fields(
         rows[0],
     );
 
-    if let Some(field) = fields.first() {
-        render_field_line(frame, rows[2], field.label, &field.value, field.selected);
-    }
-    if let Some(field) = fields.get(1) {
-        render_field_line(frame, rows[3], field.label, &field.value, field.selected);
-    }
-    if let Some(field) = fields.get(2) {
-        render_field_line(frame, rows[4], field.label, &field.value, field.selected);
-    }
+    render_field_line(
+        frame,
+        rows[2],
+        model.join_ticket.label,
+        &model.join_ticket.value,
+        focused && model.join_field == JoinField::Ticket,
+    );
+    render_field_line(
+        frame,
+        rows[3],
+        model.join_port.label,
+        &model.join_port.value,
+        focused && model.join_field == JoinField::Port,
+    );
+    render_field_line(
+        frame,
+        rows[4],
+        model.join_password.label,
+        &model.join_password.value,
+        focused && model.join_field == JoinField::Password,
+    );
 
     frame.render_widget(
         Paragraph::new(Span::styled(
-            hint,
+            "i 编辑 | ↑/↓ 切换字段",
             Style::default().fg(Color::DarkGray).bg(BG),
         )),
         rows[6],
     );
 }
 
-fn render_relay_fields(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    options: Vec<crate::state::RelayOptionSpec>,
-    relay_url: Option<crate::state::FieldSpec>,
-    hint: &'static str,
-) {
+fn render_relay_fields(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model, focused: bool) {
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -185,31 +190,45 @@ fn render_relay_fields(
         rows[0],
     );
 
-    for (i, option) in options.iter().enumerate() {
-        let marker = if option.selected { "▶ " } else { "  " };
-        let suffix = if option.applied { " (已应用)" } else { "" };
+    let selected = model.relay_state.selected().unwrap_or_default();
+    for (i, label) in RELAYS.iter().enumerate() {
+        let is_selected = focused && i == selected;
+        let marker = if is_selected { "▶ " } else { "  " };
+        let suffix = if i == model.relay_idx {
+            " (已应用)"
+        } else {
+            ""
+        };
 
-        let style = if option.selected {
+        let style = if is_selected {
             Style::default().fg(ACCENT).bg(BG)
-        } else if option.applied {
+        } else if i == model.relay_idx {
             Style::default().fg(Color::White).bg(BG)
         } else {
             Style::default().fg(Color::Gray).bg(BG)
         };
 
         frame.render_widget(
-            Paragraph::new(Span::styled(
-                format!("{marker}{}{suffix}", option.label),
-                style,
-            )),
+            Paragraph::new(Span::styled(format!("{marker}{label}{suffix}"), style)),
             rows[2 + i],
         );
     }
 
-    if let Some(field) = relay_url {
-        render_field_line(frame, rows[4], field.label, &field.value, field.selected);
+    if selected == 1 {
+        render_field_line(
+            frame,
+            rows[4],
+            model.relay_url.label,
+            &model.relay_url.value,
+            false,
+        );
     }
 
+    let hint = if selected == 1 {
+        "Enter 应用 | ↑/↓ 选择 | i 编辑URL"
+    } else {
+        "Enter 应用 | ↑/↓ 选择"
+    };
     frame.render_widget(
         Paragraph::new(Span::styled(
             hint,
