@@ -2,33 +2,37 @@
 
 ## 环境
 
-- Rust `1.94.0`
-- `just`（命令管理）
-- `cargo-nextest`（测试）
+- Rust `1.91.0` 或更高版本
+- [`only`](https://github.com/KercyDing/only)（任务运行）
+- `cargo-nextest`（可选）
+
+请先前往 [`only` 项目](https://github.com/KercyDing/only)，按照项目说明下载并安装。
+如需使用 `cargo-nextest`，可运行：
 
 ```sh
-cargo install just just-lsp
 cargo install cargo-nextest --locked
 ```
 
 ## 常用命令
 
 ```sh
-just check          # fmt + check + clippy
-just test           # 离线测试
-just test-e2e       # 网络集成测试
-just test-all       # 全量测试
-just fmt            # 格式化
-just doc            # 生成文档
-just relay-build    # 交叉编译 iroh-relay
+only check       # fmt 检查 + cargo check + clippy
+only ci          # 检查并运行开发测试
+only dev build   # 开发构建
+only dev run     # 运行开发构建
+only dev test    # 开发测试
+only rel build   # 发布构建
+only rel run     # 运行发布构建
+only rel test    # 发布测试
+only install     # 构建并安装 sckc 和 sckt
+only relay-build # 交叉编译 iroh-relay
 
-just install        # 安装 sckc
-just install-tui    # 安装 sckt
-just install-all    # 安装全部
-just uninstall      # 卸载 sculk-cli
-just uninstall-tui  # 卸载 sculk-tui
-just uninstall-all  # 卸载全部
+cargo fmt --all
+cargo doc --workspace --no-deps --open
 ```
+
+`only install` 在 macOS 和 Linux 上安装到 `~/.local/bin`，在 Windows 上安装到
+`%LOCALAPPDATA%\Programs\Sculk`。
 
 ## Workspace 结构
 

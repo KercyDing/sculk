@@ -1,0 +1,70 @@
+# Internal helper for release builds
+_release_build():
+    cargo build --release --bin sckc --bin sckt
+
+# Run cargo check
+check():
+    cargo fmt --all -- --check
+    cargo check --workspace --all-targets
+    cargo clippy --workspace --all-targets -- -D warnings
+
+# Run formatter, type checks, and tests
+ci() & check & dev.test:
+    echo "CI complete!"
+
+# Install the local sculk clients
+install() ? @os("windows") & _release_build shell?=pwsh:
+    New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA "Programs\Sculk") | Out-Null
+    Copy-Item target/release/sckc.exe -Destination (Join-Path $env:LOCALAPPDATA "Programs\Sculk\sckc.exe") -Force
+    Copy-Item target/release/sckt.exe -Destination (Join-Path $env:LOCALAPPDATA "Programs\Sculk\sckt.exe") -Force
+    Write-Output "Installed sckc and sckt to $(Join-Path $env:LOCALAPPDATA 'Programs\Sculk')"
+
+install() & _release_build:
+    mkdir -p "$HOME/.local/bin"
+    cp target/release/sckc "$HOME/.local/bin/.sckc-install"
+    cp target/release/sckt "$HOME/.local/bin/.sckt-install"
+    chmod +x "$HOME/.local/bin/.sckc-install" "$HOME/.local/bin/.sckt-install"
+    mv "$HOME/.local/bin/.sckc-install" "$HOME/.local/bin/sckc"
+    mv "$HOME/.local/bin/.sckt-install" "$HOME/.local/bin/sckt"
+    echo "Installed sckc and sckt to $HOME/.local/bin"
+
+# Build the iroh-relay server for Linux targets
+relay-build(target="all") ? @os("windows") shell?=pwsh:
+    pwsh scripts/deploy/build.ps1 -Target {{target}}
+
+relay-build(target="all"):
+    bash scripts/deploy/build.sh {{target}}
+
+# Development builds
+[dev]
+# Build the project in development mode.
+build():
+    cargo build
+
+# Run the project in development mode
+run():
+    cargo run
+
+# Run the full test suite
+test() ? @has("cargo-nextest"):
+    cargo nextest run
+
+test():
+    cargo test
+
+# Release builds
+[rel]
+# Build the project in release mode.
+build():
+    cargo build --release
+
+# Run the project in release mode
+run():
+    cargo run --release
+
+# Run the release test suite
+test() ? @has("cargo-nextest"):
+    cargo nextest run --release
+
+test():
+    cargo test --release

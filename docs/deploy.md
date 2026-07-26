@@ -14,9 +14,9 @@ sculk 默认使用 n0 提供的公共 relay，如需自建，参考以下步骤�
 ### 方式二：本地交叉编译
 
 ```bash
-just relay-build        # 编译全部架构（amd64 + arm64）
-just relay-build amd64  # 仅 linux/amd64
-just relay-build arm64  # 仅 linux/arm64
+only relay-build        # 编译全部架构（amd64 + arm64）
+only relay-build amd64  # 仅 linux/amd64
+only relay-build arm64  # 仅 linux/arm64
 ```
 
 产物输出至 `target/relay/bin/`。编译依赖 musl-cross 工具链：
@@ -55,7 +55,7 @@ iroh-relay 启动后会在日志中打印监听地址，将该地址填入 sculk
 
 ```bash
 # CLI
-sculk relay --url <iroh-relay 输出的 URL>
+sckc relay --url <iroh-relay 输出的 URL>
 
 # TUI
 # 进入「中继」标签页，切换到「自建中继」并填入 URL
