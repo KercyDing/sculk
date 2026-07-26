@@ -13,20 +13,27 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-22.04
             suffix: linux-amd64
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            suffix: linux-arm64
           - target: x86_64-apple-darwin
-            runner: macos-latest
+            runner: macos-15-intel
             suffix: darwin-amd64
           - target: aarch64-apple-darwin
-            runner: macos-latest
+            runner: macos-15
             suffix: darwin-arm64
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             suffix: windows-amd64
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            suffix: windows-arm64
 
     runs-on: ${{ matrix.runner }}
 
@@ -43,10 +50,15 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Install musl-tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
         run: cargo build --workspace --bins --release --target ${{ matrix.target }}
 
       - name: Rename artifacts (unix)
