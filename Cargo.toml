@@ -8,13 +8,13 @@ edition = "2024"
 license = "GPL-3.0"
 repository = "https://github.com/KercyDing/sculk"
 rust-version = "1.91"
-version = "0.3.0"
+version = "0.3.1"
 
 [workspace.dependencies]
-sculk = { path = "core", version = "0.3.0" }
+sculk = { path = "core", version = "0.3.1" }
 anyhow = "1.0"
 futures-util = "0.3"
-iroh = "1.0.2"
+iroh = "1"
 tokio = { version = "1.52", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
