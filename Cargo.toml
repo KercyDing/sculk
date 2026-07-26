@@ -8,10 +8,10 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/KercyDing/sculk"
 rust-version = "1.91"
-version = "0.3.1"
+version = "0.4.0"
 
 [workspace.dependencies]
-sculk = { path = "core", version = "0.3.1" }
+sculk = { path = "core", version = "0.4.0" }
 anyhow = "1.0"
 futures-util = "0.3"
 iroh = { version = "1", default-features = false, features = ["portmapper", "tls-ring"] }

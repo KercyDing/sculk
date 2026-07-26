@@ -1,6 +1,6 @@
 # Maintainer: KercyDing <dkx215417@gmail.com>
 pkgname=sculk-cli-bin
-pkgver=0.3.1
+pkgver=0.4.0
 pkgrel=1
 _releasever=${pkgver//_/-}
 pkgdesc="Minecraft P2P multiplayer tunnel CLI"
