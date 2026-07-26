@@ -183,40 +183,20 @@ fn status_label_phases() {
 }
 
 #[test]
-fn handle_app_event_closed() {
-    use crate::services::tunnel::AppEvent;
+fn handle_tunnel_update_closed() {
+    use sculk::tunnel::TunnelUpdate;
 
     let mut state = test_state();
-    state.phase = TunnelPhase::Active;
+    state.phase = TunnelPhase::Stopping;
     state.active_mode = Some(ActiveTab::Host);
     state.ticket = Some("test".to_string());
 
-    state.handle_app_event(AppEvent::Closed);
+    state.handle_tunnel_update(TunnelUpdate::Status(state.ctx.tunnel.status()));
 
     assert_eq!(state.phase, TunnelPhase::Idle);
     assert!(state.active_mode.is_none());
     assert!(state.ticket.is_none());
     assert!(state.connections.is_empty());
-}
-
-#[test]
-fn handle_app_event_start_failed() {
-    use crate::services::tunnel::AppEvent;
-
-    let mut state = test_state();
-    state.phase = TunnelPhase::Starting;
-    state.active_mode = Some(ActiveTab::Host);
-
-    state.handle_app_event(AppEvent::StartFailed("test error".into()));
-
-    assert_eq!(state.phase, TunnelPhase::Idle);
-    assert!(state.active_mode.is_none());
-    assert!(
-        state
-            .logs
-            .last()
-            .is_some_and(|msg| msg.contains("test error"))
-    );
 }
 
 #[test]
@@ -304,20 +284,6 @@ fn logs_spec_marquee_for_selected_row() {
 
     assert_eq!(text0, "abcdef");
     assert_eq!(text1, "bcdefg");
-}
-
-#[test]
-fn handle_app_event_close_failed_logs_error() {
-    use crate::services::tunnel::AppEvent;
-
-    let mut state = test_state();
-    state.handle_app_event(AppEvent::CloseFailed("close failed".into()));
-    assert!(
-        state
-            .logs
-            .last()
-            .is_some_and(|msg| msg.contains("close failed"))
-    );
 }
 
 #[test]

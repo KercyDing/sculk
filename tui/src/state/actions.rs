@@ -58,17 +58,16 @@ pub(crate) fn toggle_host(state: &mut AppState) {
                 }
             };
 
-            state.phase = TunnelPhase::Starting;
-            state.active_mode = Some(ActiveTab::Host);
             state.quit_pressed_at = None;
             state.add_log(&format!("正在启动 host 隧道 (端口 {port})..."));
-            state.ctx.startup_handle = Some(tunnel::spawn_host(
+            tunnel::spawn_host(
+                state.ctx.tunnel.clone(),
                 port,
                 secret_key,
                 relay_url,
                 password,
                 state.ctx.app_tx.clone(),
-            ));
+            );
         }
         TunnelPhase::Active if state.active_mode == Some(ActiveTab::Host) => {
             stop_tunnel(state);
@@ -100,16 +99,15 @@ pub(crate) fn toggle_join(state: &mut AppState) {
                 Some(state.join_password.value.clone())
             };
 
-            state.phase = TunnelPhase::Starting;
-            state.active_mode = Some(ActiveTab::Join);
             state.quit_pressed_at = None;
             state.add_log("正在连接...");
-            state.ctx.startup_handle = Some(tunnel::spawn_join(
+            tunnel::spawn_join(
+                state.ctx.tunnel.clone(),
                 &state.join_ticket.value,
                 port,
                 password,
                 state.ctx.app_tx.clone(),
-            ));
+            );
         }
         TunnelPhase::Active if state.active_mode == Some(ActiveTab::Join) => {
             stop_tunnel(state);
@@ -184,13 +182,7 @@ pub(crate) fn apply_relay(state: &mut AppState) {
 
 /// 停止当前隧道。
 pub(crate) fn stop_tunnel(state: &mut AppState) {
-    if let Some(handle) = state.ctx.event_forwarder.take() {
-        handle.abort();
-    }
-    if let Some(t) = state.ctx.tunnel.take() {
-        state.phase = TunnelPhase::Stopping;
-        state.quit_pressed_at = None;
-        state.add_log("正在关闭隧道...");
-        tunnel::spawn_close(t, state.ctx.app_tx.clone());
-    }
+    state.quit_pressed_at = None;
+    state.add_log("正在关闭隧道...");
+    tunnel::spawn_close(state.ctx.tunnel.clone(), state.ctx.app_tx.clone());
 }

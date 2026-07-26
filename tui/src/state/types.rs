@@ -35,18 +35,6 @@ pub enum Step {
     Exit,
 }
 
-/// 隧道生命周期状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LifecycleState {
-    Idle,
-    Starting,
-    Active,
-    Stopping,
-}
-
-/// 兼容历史命名。
-pub type TunnelPhase = LifecycleState;
-
 /// Host 标签页中当前聚焦的输入字段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostField {

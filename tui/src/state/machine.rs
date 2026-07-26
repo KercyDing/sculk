@@ -31,13 +31,12 @@ pub(crate) fn overlay_state(state: &AppState) -> UiOverlayState {
 pub(crate) fn handle_lifecycle_esc(state: &mut AppState) -> Step {
     match state.phase {
         TunnelPhase::Starting => {
-            if let Some(handle) = state.ctx.startup_handle.take() {
-                handle.abort();
-            }
-            state.phase = TunnelPhase::Idle;
-            state.active_mode = None;
             state.quit_pressed_at = None;
-            state.add_log("已取消启动");
+            state.add_log("正在取消启动...");
+            crate::services::tunnel::spawn_close(
+                state.ctx.tunnel.clone(),
+                state.ctx.app_tx.clone(),
+            );
             Step::Continue
         }
         TunnelPhase::Active => {

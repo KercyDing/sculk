@@ -14,6 +14,6 @@ pub use event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent}
 pub use iroh::IrohTunnel;
 pub use service::{
     HostOptions, JoinOptions, TunnelMode, TunnelPhase, TunnelService, TunnelServiceError,
-    TunnelState, TunnelStatus,
+    TunnelState, TunnelStatus, TunnelSubscription, TunnelUpdate,
 };
 pub use ticket::Ticket;

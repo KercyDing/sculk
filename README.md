@@ -54,7 +54,7 @@ sckt
 ## 文档
 
 - [开发文档](docs/develop.md)
-- [自建 Relay 指导文档](docs/deploy.md)
+- [自建 Relay](https://github.com/KercyDing/iroh-relay)
 
 ## 许可证
 

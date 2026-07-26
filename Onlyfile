@@ -29,13 +29,6 @@ install() & _release_build:
     mv "$HOME/.local/bin/.sckt-install" "$HOME/.local/bin/sckt"
     echo "Installed sckc and sckt to $HOME/.local/bin"
 
-# Build the iroh-relay server for Linux targets
-relay-build(target="all") ? @os("windows") shell?=pwsh:
-    pwsh scripts/deploy/build.ps1 -Target {{target}}
-
-relay-build(target="all"):
-    bash scripts/deploy/build.sh {{target}}
-
 # Development builds
 [dev]
 # Build the project in development mode.

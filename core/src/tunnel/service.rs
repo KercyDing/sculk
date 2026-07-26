@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::{Mutex, broadcast, watch};
@@ -14,10 +15,10 @@ use super::{
 use crate::SculkError;
 
 const EVENT_BROADCAST_SIZE: usize = 128;
+const STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(200);
 
 /// 隧道运行角色。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum TunnelMode {
     Host,
     Join,
@@ -25,7 +26,6 @@ pub enum TunnelMode {
 
 /// 托管隧道生命周期阶段。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum TunnelPhase {
     Idle,
     Starting,
@@ -171,6 +171,71 @@ pub enum TunnelServiceError {
     Tunnel(#[from] SculkError),
 }
 
+/// 托管隧道的统一更新。
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum TunnelUpdate {
+    /// 生命周期与连接指标的最新完整快照。
+    Status(TunnelStatus),
+    /// 连接、重连、路径变化或错误等过程事件。
+    Event(TunnelEvent),
+}
+
+/// 托管隧道统一订阅端。
+///
+/// 首次调用 [`Self::recv`] 会返回当时的最新状态，随后同时接收状态变化和过程事件。
+/// 状态使用 `watch` 保证可恢复到最新值，过程事件使用有界广播且不会阻塞网络任务。
+pub struct TunnelSubscription {
+    status: watch::Receiver<TunnelStatus>,
+    events: broadcast::Receiver<TunnelEvent>,
+    initial_status_pending: bool,
+    status_open: bool,
+    events_open: bool,
+}
+
+impl TunnelSubscription {
+    /// 接收下一项状态或过程事件；所有发送端关闭且缓冲区耗尽时返回 `None`。
+    pub async fn recv(&mut self) -> Option<TunnelUpdate> {
+        if self.initial_status_pending {
+            self.initial_status_pending = false;
+            return Some(TunnelUpdate::Status(self.status.borrow().clone()));
+        }
+
+        loop {
+            if !self.status_open && !self.events_open {
+                return None;
+            }
+            tokio::select! {
+                result = self.status.changed(), if self.status_open => {
+                    match result {
+                        Ok(()) => {
+                            return Some(TunnelUpdate::Status(self.status.borrow().clone()));
+                        }
+                        Err(_) => {
+                            self.status_open = false;
+                        }
+                    }
+                }
+                event = self.events.recv(), if self.events_open => {
+                    match event {
+                        Ok(event) => return Some(TunnelUpdate::Event(event)),
+                        Err(broadcast::error::RecvError::Lagged(count)) => {
+                            return Some(TunnelUpdate::Event(TunnelEvent::Error {
+                                message: format!(
+                                    "event subscriber lagged and lost {count} events"
+                                ),
+                            }));
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            self.events_open = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// 单实例托管隧道服务。
 ///
 /// 克隆值共享同一条活动隧道。低层调用方仍可直接使用 [`IrohTunnel`]。
@@ -181,16 +246,21 @@ pub struct TunnelService {
 
 struct ServiceInner {
     state: Mutex<ServiceState>,
-    state_tx: watch::Sender<TunnelState>,
+    status_tx: watch::Sender<TunnelStatus>,
     event_tx: broadcast::Sender<TunnelEvent>,
     operation_next: AtomicU64,
 }
 
 enum ServiceState {
     Idle,
-    Starting { operation_id: u64, mode: TunnelMode },
+    Starting {
+        operation_id: u64,
+        task: Option<JoinHandle<()>>,
+    },
     Active(ActiveTunnel),
-    Stopping { operation_id: u64, mode: TunnelMode },
+    Stopping {
+        operation_id: u64,
+    },
 }
 
 struct ActiveTunnel {
@@ -210,22 +280,43 @@ impl Default for TunnelService {
 impl TunnelService {
     /// 创建空闲的托管隧道服务。
     pub fn new() -> Self {
-        let (state_tx, _) = watch::channel(TunnelState::idle());
+        let initial_status = TunnelStatus::idle();
+        let (status_tx, _) = watch::channel(initial_status);
         let (event_tx, _) = broadcast::channel(EVENT_BROADCAST_SIZE);
         Self {
             inner: Arc::new(ServiceInner {
                 state: Mutex::new(ServiceState::Idle),
-                state_tx,
+                status_tx,
                 event_tx,
                 operation_next: AtomicU64::new(1),
             }),
         }
     }
 
-    /// 启动 Host；调用 future 被取消时，服务会自动恢复到空闲态。
-    pub async fn host(&self, options: HostOptions) -> Result<TunnelStatus, TunnelServiceError> {
+    /// 在 core 内部启动并托管 Host 任务。
+    ///
+    /// 返回成功表示任务已被接受；后续失败通过 [`Self::subscribe`] 发布。
+    pub async fn start_host(&self, options: HostOptions) -> Result<(), TunnelServiceError> {
         validate_host_options(&options)?;
         let guard = self.begin_start(TunnelMode::Host).await?;
+        let operation_id = guard.operation_id;
+        let service = self.clone();
+        let task = tokio::spawn(async move {
+            if let Err(error) = service.clone().complete_host(options, guard).await
+                && !matches!(error, TunnelServiceError::Busy)
+            {
+                service.publish_error("host start failed", &error);
+            }
+        });
+        self.attach_start_task(operation_id, task).await;
+        Ok(())
+    }
+
+    async fn complete_host(
+        &self,
+        options: HostOptions,
+        guard: OperationGuard,
+    ) -> Result<TunnelStatus, TunnelServiceError> {
         let result = IrohTunnel::host(
             options.mc_port,
             options.secret_key,
@@ -246,10 +337,30 @@ impl TunnelService {
         }
     }
 
-    /// 加入 Host；调用 future 被取消时，服务会自动恢复到空闲态。
-    pub async fn join(&self, options: JoinOptions) -> Result<TunnelStatus, TunnelServiceError> {
+    /// 在 core 内部启动并托管 Join 任务。
+    ///
+    /// 返回成功表示任务已被接受；后续失败通过 [`Self::subscribe`] 发布。
+    pub async fn start_join(&self, options: JoinOptions) -> Result<(), TunnelServiceError> {
         validate_join_options(&options)?;
         let guard = self.begin_start(TunnelMode::Join).await?;
+        let operation_id = guard.operation_id;
+        let service = self.clone();
+        let task = tokio::spawn(async move {
+            if let Err(error) = service.clone().complete_join(options, guard).await
+                && !matches!(error, TunnelServiceError::Busy)
+            {
+                service.publish_error("join start failed", &error);
+            }
+        });
+        self.attach_start_task(operation_id, task).await;
+        Ok(())
+    }
+
+    async fn complete_join(
+        &self,
+        options: JoinOptions,
+        guard: OperationGuard,
+    ) -> Result<TunnelStatus, TunnelServiceError> {
         let result = IrohTunnel::join(&options.ticket, options.local_port, options.config).await;
 
         match result {
@@ -285,39 +396,20 @@ impl TunnelService {
         }
     }
 
-    /// 返回包含连接指标的当前完整状态。
-    pub async fn status(&self) -> Result<TunnelStatus, TunnelServiceError> {
-        let state = self.inner.state.lock().await;
-        match &*state {
-            ServiceState::Idle => Ok(TunnelStatus::idle()),
-            ServiceState::Starting { mode, .. } => Ok(TunnelStatus {
-                state: TunnelState::pending(TunnelPhase::Starting, *mode),
-                connections: Vec::new(),
-            }),
-            ServiceState::Stopping { mode, .. } => Ok(TunnelStatus {
-                state: TunnelState::pending(TunnelPhase::Stopping, *mode),
-                connections: Vec::new(),
-            }),
-            ServiceState::Active(active) => active.status().map_err(Into::into),
+    /// 返回无需异步锁的最新完整状态快照。
+    pub fn status(&self) -> TunnelStatus {
+        self.inner.status_tx.borrow().clone()
+    }
+
+    /// 统一订阅状态快照与过程事件。
+    pub fn subscribe(&self) -> TunnelSubscription {
+        TunnelSubscription {
+            status: self.inner.status_tx.subscribe(),
+            events: self.inner.event_tx.subscribe(),
+            initial_status_pending: true,
+            status_open: true,
+            events_open: true,
         }
-    }
-
-    /// 返回无需异步锁的最新生命周期快照。
-    pub fn state(&self) -> TunnelState {
-        self.inner.state_tx.borrow().clone()
-    }
-
-    /// 订阅权威生命周期状态。`watch` 始终保留最新值。
-    pub fn subscribe_state(&self) -> watch::Receiver<TunnelState> {
-        self.inner.state_tx.subscribe()
-    }
-
-    /// 订阅隧道事件；可在启动前订阅，多个调用方可同时接收。
-    ///
-    /// 消费者落后超过内部容量时会收到
-    /// [`broadcast::error::RecvError::Lagged`]，但不会阻塞隧道网络任务。
-    pub fn subscribe_events(&self) -> broadcast::Receiver<TunnelEvent> {
-        self.inner.event_tx.subscribe()
     }
 
     async fn begin_start(&self, mode: TunnelMode) -> Result<OperationGuard, TunnelServiceError> {
@@ -326,8 +418,14 @@ impl TunnelService {
             return Err(TunnelServiceError::Busy);
         }
         let operation_id = self.next_operation_id();
-        *state = ServiceState::Starting { operation_id, mode };
-        self.publish(TunnelState::pending(TunnelPhase::Starting, mode));
+        *state = ServiceState::Starting {
+            operation_id,
+            task: None,
+        };
+        self.publish(TunnelStatus {
+            state: TunnelState::pending(TunnelPhase::Starting, mode),
+            connections: Vec::new(),
+        });
         Ok(OperationGuard::new(self.clone(), operation_id))
     }
 
@@ -343,11 +441,31 @@ impl TunnelService {
             active.close().await;
             return Err(TunnelServiceError::Busy);
         }
-        active.start_events(self.inner.event_tx.clone());
+        active.start_events(
+            self.inner.event_tx.clone(),
+            self.inner.status_tx.clone(),
+            status.clone(),
+        );
         *state = ServiceState::Active(active);
-        self.publish(status.state.clone());
+        self.publish(status.clone());
         guard.disarm();
         Ok(status)
+    }
+
+    async fn attach_start_task(&self, operation_id: u64, task: JoinHandle<()>) {
+        let mut state = self.inner.state.lock().await;
+        match &mut *state {
+            ServiceState::Starting {
+                operation_id: current,
+                task: current_task,
+            } if *current == operation_id => {
+                assert!(current_task.is_none());
+                *current_task = Some(task);
+            }
+            _ => {
+                task.abort();
+            }
+        }
     }
 
     async fn fail_start(&self, mut guard: OperationGuard) {
@@ -362,17 +480,24 @@ impl TunnelService {
         let operation_id = self.next_operation_id();
         let previous = std::mem::replace(&mut *state, ServiceState::Idle);
         match previous {
-            ServiceState::Active(active) => {
+            ServiceState::Active(mut active) => {
                 let mode = active.mode;
-                *state = ServiceState::Stopping { operation_id, mode };
-                self.publish(TunnelState::pending(TunnelPhase::Stopping, mode));
+                active.stop_events().await;
+                *state = ServiceState::Stopping { operation_id };
+                self.publish(TunnelStatus {
+                    state: TunnelState::pending(TunnelPhase::Stopping, mode),
+                    connections: Vec::new(),
+                });
                 Ok(Some((
                     active,
                     OperationGuard::new(self.clone(), operation_id),
                 )))
             }
-            ServiceState::Starting { .. } => {
-                self.publish(TunnelState::idle());
+            ServiceState::Starting { task, .. } => {
+                if let Some(task) = task {
+                    task.abort();
+                }
+                self.publish(TunnelStatus::idle());
                 Ok(None)
             }
             other => {
@@ -397,7 +522,7 @@ impl TunnelService {
         let mut state = self.inner.state.lock().await;
         if state.operation_id() == Some(operation_id) {
             *state = ServiceState::Idle;
-            self.publish(TunnelState::idle());
+            self.publish(TunnelStatus::idle());
         }
     }
 
@@ -405,15 +530,21 @@ impl TunnelService {
         self.inner.operation_next.fetch_add(1, Ordering::Relaxed)
     }
 
-    fn publish(&self, state: TunnelState) {
-        self.inner.state_tx.send_replace(state);
+    fn publish(&self, status: TunnelStatus) {
+        self.inner.status_tx.send_replace(status);
+    }
+
+    fn publish_error(&self, context: &str, error: &TunnelServiceError) {
+        let _ = self.inner.event_tx.send(TunnelEvent::Error {
+            message: format!("{context}: {error}"),
+        });
     }
 }
 
 impl ServiceState {
     fn operation_id(&self) -> Option<u64> {
         match self {
-            Self::Starting { operation_id, .. } | Self::Stopping { operation_id, .. } => {
+            Self::Starting { operation_id, .. } | Self::Stopping { operation_id } => {
                 Some(*operation_id)
             }
             Self::Idle | Self::Active(_) => None,
@@ -482,16 +613,46 @@ impl ActiveTunnel {
         }
     }
 
-    fn start_events(&mut self, event_tx: broadcast::Sender<TunnelEvent>) {
+    fn start_events(
+        &mut self,
+        event_tx: broadcast::Sender<TunnelEvent>,
+        status_tx: watch::Sender<TunnelStatus>,
+        initial_status: TunnelStatus,
+    ) {
         assert!(self.event_task.is_none());
         assert!(self.events.is_some());
         let Some(mut events) = self.events.take() else {
             return;
         };
+        let tunnel = self.tunnel.clone();
         let forward_tx = event_tx.clone();
+        let mut status = initial_status;
         let event_task = tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
-                let _ = forward_tx.send(event);
+            let first_refresh = tokio::time::Instant::now() + STATUS_REFRESH_INTERVAL;
+            let mut interval = tokio::time::interval_at(first_refresh, STATUS_REFRESH_INTERVAL);
+            let mut events_open = true;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let Ok(connections) = tunnel.connections() else {
+                            continue;
+                        };
+                        if status.connections != connections {
+                            status.connections = connections;
+                            status_tx.send_replace(status.clone());
+                        }
+                    }
+                    event = events.recv(), if events_open => {
+                        match event {
+                            Some(event) => {
+                                let _ = forward_tx.send(event);
+                            }
+                            None => {
+                                events_open = false;
+                            }
+                        }
+                    }
+                }
             }
         });
         self.event_task = Some(event_task);
@@ -514,6 +675,10 @@ impl ActiveTunnel {
 
     async fn close(mut self) {
         self.tunnel.close().await;
+        self.stop_events().await;
+    }
+
+    async fn stop_events(&mut self) {
         if let Some(task) = self.event_task.take() {
             task.abort();
             let _ = task.await;
@@ -548,33 +713,35 @@ fn validate_join_options(options: &JoinOptions) -> Result<(), TunnelServiceError
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
+
     use super::*;
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
 
     #[tokio::test]
     async fn new_service_is_idle() {
         let service = TunnelService::new();
 
-        let status = service.status().await;
+        let status = service.status();
 
-        assert!(matches!(
-            status,
-            Ok(TunnelStatus {
-                state: TunnelState {
-                    phase: TunnelPhase::Idle,
-                    ..
-                },
-                ..
-            })
-        ));
+        assert_eq!(status.state.phase, TunnelPhase::Idle);
+        assert!(status.connections.is_empty());
     }
 
     #[tokio::test]
     async fn rejects_invalid_options_before_starting() {
         let service = TunnelService::new();
 
-        let host = service.host(HostOptions::new(0)).await;
+        let host = service.start_host(HostOptions::new(0)).await;
         assert!(matches!(host, Err(TunnelServiceError::InvalidPort)));
-        assert_eq!(service.state().phase, TunnelPhase::Idle);
+        assert_eq!(service.status().state.phase, TunnelPhase::Idle);
     }
 
     #[tokio::test]
@@ -585,7 +752,7 @@ mod tests {
         drop(guard);
         tokio::task::yield_now().await;
 
-        assert_eq!(service.state().phase, TunnelPhase::Idle);
+        assert_eq!(service.status().state.phase, TunnelPhase::Idle);
     }
 
     #[tokio::test]
@@ -602,11 +769,32 @@ mod tests {
     #[tokio::test]
     async fn stop_cancels_starting_operation() {
         let service = TunnelService::new();
-        let mut states = service.subscribe_state();
+        let mut updates = service.subscribe();
+        let initial = updates.recv().await;
+        assert!(matches!(
+            initial,
+            Some(TunnelUpdate::Status(TunnelStatus {
+                state: TunnelState {
+                    phase: TunnelPhase::Idle,
+                    ..
+                },
+                ..
+            }))
+        ));
         let guard = service.begin_start(TunnelMode::Host).await;
         assert!(guard.is_ok(), "begin start");
-        assert!(states.changed().await.is_ok(), "receive starting state");
-        assert_eq!(states.borrow().phase, TunnelPhase::Starting);
+        let starting = updates.recv().await;
+        assert!(matches!(
+            starting,
+            Some(TunnelUpdate::Status(TunnelStatus {
+                state: TunnelState {
+                    phase: TunnelPhase::Starting,
+                    mode: Some(TunnelMode::Host),
+                    ..
+                },
+                ..
+            }))
+        ));
 
         let status = service.stop().await;
 
@@ -620,12 +808,83 @@ mod tests {
                 ..
             })
         ));
-        assert!(states.changed().await.is_ok(), "receive idle state");
-        assert_eq!(states.borrow().phase, TunnelPhase::Idle);
-        assert_eq!(service.state().phase, TunnelPhase::Idle);
+        let idle = updates.recv().await;
+        assert!(matches!(
+            idle,
+            Some(TunnelUpdate::Status(TunnelStatus {
+                state: TunnelState {
+                    phase: TunnelPhase::Idle,
+                    ..
+                },
+                ..
+            }))
+        ));
+        assert_eq!(service.status().state.phase, TunnelPhase::Idle);
         drop(guard);
         tokio::task::yield_now().await;
-        assert_eq!(service.state().phase, TunnelPhase::Idle);
+        assert_eq!(service.status().state.phase, TunnelPhase::Idle);
+    }
+
+    #[tokio::test]
+    async fn unified_subscription_starts_with_status_and_tracks_changes() {
+        let service = TunnelService::new();
+        let mut updates = service.subscribe();
+
+        let initial = updates.recv().await;
+        assert!(matches!(
+            initial,
+            Some(TunnelUpdate::Status(TunnelStatus {
+                state: TunnelState {
+                    phase: TunnelPhase::Idle,
+                    ..
+                },
+                ..
+            }))
+        ));
+
+        let guard = service.begin_start(TunnelMode::Join).await;
+        assert!(guard.is_ok(), "begin start");
+        let starting = updates.recv().await;
+        assert!(matches!(
+            starting,
+            Some(TunnelUpdate::Status(TunnelStatus {
+                state: TunnelState {
+                    phase: TunnelPhase::Starting,
+                    mode: Some(TunnelMode::Join),
+                    ..
+                },
+                ..
+            }))
+        ));
+    }
+
+    #[tokio::test]
+    async fn stop_aborts_managed_start_task() {
+        let service = TunnelService::new();
+        let guard = service.begin_start(TunnelMode::Host).await;
+        assert!(guard.is_ok(), "begin start");
+        let Ok(guard) = guard else {
+            return;
+        };
+        let operation_id = guard.operation_id;
+        let dropped = Arc::new(AtomicBool::new(false));
+        let task_flag = DropFlag(dropped.clone());
+        let task = tokio::spawn(async move {
+            let _guard = guard;
+            let _task_flag = task_flag;
+            std::future::pending::<()>().await;
+        });
+        service.attach_start_task(operation_id, task).await;
+
+        let status = service.stop().await;
+        assert!(status.is_ok(), "stop managed start");
+        let Ok(status) = status else {
+            return;
+        };
+        tokio::task::yield_now().await;
+
+        assert_eq!(status.state.phase, TunnelPhase::Idle);
+        assert!(dropped.load(Ordering::Relaxed));
     }
 
     #[tokio::test]
@@ -633,6 +892,6 @@ mod tests {
         let service = TunnelService::new();
 
         assert!(service.shutdown().await.is_ok());
-        assert_eq!(service.state().phase, TunnelPhase::Idle);
+        assert_eq!(service.status().state.phase, TunnelPhase::Idle);
     }
 }

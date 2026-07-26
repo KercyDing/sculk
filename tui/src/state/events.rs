@@ -2,85 +2,64 @@
 
 use std::time::Instant;
 
-use sculk::tunnel::TunnelEvent;
+use sculk::tunnel::{TunnelEvent, TunnelMode, TunnelStatus, TunnelUpdate};
 
-use crate::services::tunnel::AppEvent;
-use crate::services::{persist, tunnel};
+use crate::services::persist;
 use crate::state::{AppState, TunnelPhase};
 
-/// 处理来自隧道任务的内部事件。
-pub(crate) fn handle_app_event(state: &mut AppState, event: AppEvent) {
-    match event {
-        AppEvent::HostStarted {
-            tunnel,
-            ticket,
-            events,
-        } => {
-            state.ctx.startup_handle = None;
-            state.phase = TunnelPhase::Active;
-            state.quit_pressed_at = None;
-            state.ctx.tunnel = Some(tunnel);
+/// 处理 core 统一订阅发布的更新。
+pub(crate) fn handle_tunnel_update(state: &mut AppState, update: TunnelUpdate) {
+    match update {
+        TunnelUpdate::Status(status) => apply_status(state, status),
+        TunnelUpdate::Event(event) => handle_tunnel_event(state, event),
+        _ => {}
+    }
+}
 
-            if persist::clipboard_copy(&ticket) {
-                state.add_log("票据已复制到剪贴板");
+fn apply_status(state: &mut AppState, status: TunnelStatus) {
+    let previous_phase = state.phase;
+    let previous_mode = state.active_mode;
+    let next_mode = match status.state.mode {
+        Some(TunnelMode::Host) => Some(crate::state::ActiveTab::Host),
+        Some(TunnelMode::Join) => Some(crate::state::ActiveTab::Join),
+        None => None,
+    };
+    let next_ticket = status.state.ticket.as_ref().map(ToString::to_string);
+
+    state.phase = status.state.phase;
+    state.active_mode = next_mode;
+    state.ticket = next_ticket;
+    state.connections = status.connections;
+
+    if state.phase != previous_phase {
+        state.quit_pressed_at = None;
+    }
+    if state.phase == TunnelPhase::Active && previous_phase == TunnelPhase::Starting {
+        match state.active_mode {
+            Some(crate::state::ActiveTab::Host) => {
+                state.host_password.clear();
+                state.add_log("host 隧道已启动");
             }
-            state.ticket = Some(ticket);
-
-            state.host_password.clear();
-            state.add_log("host 隧道已启动");
-            state.ctx.event_forwarder = Some(tunnel::spawn_event_forwarder(
-                events,
-                state.ctx.app_tx.clone(),
-            ));
-        }
-        AppEvent::JoinConnected { tunnel, events } => {
-            state.ctx.startup_handle = None;
-            state.phase = TunnelPhase::Active;
-            state.quit_pressed_at = None;
-            state.ctx.tunnel = Some(tunnel);
-            state.join_password.clear();
-            state.add_log("已成功连入隧道");
-
-            state.ctx.profile.join.last_ticket = Some(state.join_ticket.value.clone());
-            if let Err(e) = persist::save_profile(&state.ctx.profile) {
-                state.add_log(&format!("配置保存失败: {e}"));
+            Some(crate::state::ActiveTab::Join) => {
+                state.join_password.clear();
+                state.add_log("已成功连入隧道");
+                state.ctx.profile.join.last_ticket = Some(state.join_ticket.value.clone());
+                if let Err(e) = persist::save_profile(&state.ctx.profile) {
+                    state.add_log(&format!("配置保存失败: {e}"));
+                }
             }
-
-            state.ctx.event_forwarder = Some(tunnel::spawn_event_forwarder(
-                events,
-                state.ctx.app_tx.clone(),
-            ));
+            Some(crate::state::ActiveTab::Relay) | None => {}
         }
-        AppEvent::StartFailed(msg) => {
-            state.ctx.startup_handle = None;
-            state.phase = TunnelPhase::Idle;
-            state.quit_pressed_at = None;
-            state.active_mode = None;
-            state.add_log(&msg);
-        }
-        AppEvent::CloseFailed(msg) => {
-            state.phase = TunnelPhase::Idle;
-            state.quit_pressed_at = None;
-            state.active_mode = None;
-            state.ctx.tunnel = None;
-            state.ticket = None;
-            state.connections.clear();
-            state.ctx.event_forwarder = None;
-            state.add_log(&msg);
-        }
-        AppEvent::Closed => {
-            state.phase = TunnelPhase::Idle;
-            state.quit_pressed_at = None;
-            state.active_mode = None;
-            state.ctx.tunnel = None;
-            state.ticket = None;
-            state.connections.clear();
-            state.ctx.event_forwarder = None;
-            state.host_password.clear();
-            state.join_password.clear();
+    }
+    if state.phase == TunnelPhase::Idle && previous_phase != TunnelPhase::Idle {
+        state.host_password.clear();
+        state.join_password.clear();
+        if matches!(previous_phase, TunnelPhase::Active | TunnelPhase::Stopping) {
             state.add_log("隧道已关闭");
         }
-        AppEvent::Tunnel(te) => handle_tunnel_event(state, te),
+    }
+    if previous_mode != state.active_mode && state.phase == TunnelPhase::Idle {
+        state.active_mode = None;
     }
 }
 
@@ -109,7 +88,7 @@ pub(crate) fn handle_tunnel_event(state: &mut AppState, event: TunnelEvent) {
     state.add_log(&msg);
 }
 
-/// 定时刷新：递增 tick、清理退出提示、更新连接快照、检测异常句柄。
+/// 定时刷新：递增 tick 并清理退出提示。
 pub(crate) fn on_tick(state: &mut AppState) {
     state.tick = state.tick.saturating_add(1);
 
@@ -117,30 +96,5 @@ pub(crate) fn on_tick(state: &mut AppState) {
         && Instant::now().duration_since(prev).as_secs() >= 1
     {
         state.quit_pressed_at = None;
-    }
-
-    if state.phase == TunnelPhase::Active
-        && let Some(ref tunnel) = state.ctx.tunnel
-    {
-        match tunnel.connections() {
-            Ok(connections) => {
-                state.connections = connections;
-            }
-            Err(e) => {
-                state.add_log(&format!("连接快照更新失败: {e}"));
-            }
-        }
-    }
-
-    // 检测 startup_handle 异常结束（panic / 无事件退出）
-    if state.phase == TunnelPhase::Starting
-        && let Some(ref handle) = state.ctx.startup_handle
-        && handle.is_finished()
-    {
-        tracing::warn!("startup handle finished without sending event, resetting to Idle");
-        state.ctx.startup_handle = None;
-        state.phase = TunnelPhase::Idle;
-        state.active_mode = None;
-        state.add_log("启动任务异常终止");
     }
 }

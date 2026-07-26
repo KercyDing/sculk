@@ -1,102 +1,85 @@
 //! 隧道服务运行时：启动、关闭与事件转发。
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use sculk::tunnel::{HostConfig, IrohTunnel, JoinConfig, Ticket, TunnelEvent};
+use sculk::tunnel::{HostConfig, HostOptions, JoinConfig, JoinOptions, Ticket, TunnelService};
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
-
-use super::events::AppEvent;
 
 /// 异步启动 host 隧道。
 pub fn spawn_host(
+    service: TunnelService,
     port: u16,
     secret_key: sculk::SecretKey,
     relay_url: Option<sculk::RelayUrl>,
     password: Option<String>,
-    tx: mpsc::UnboundedSender<AppEvent>,
-) -> JoinHandle<()> {
+    tx: mpsc::UnboundedSender<String>,
+) {
     tokio::spawn(async move {
         let config = HostConfig::new()
             .event_delay(Duration::ZERO)
             .password(password);
-        match IrohTunnel::host(port, Some(secret_key), relay_url, config).await {
-            Ok((tunnel, ticket, events)) => {
-                let _ = tx.send(AppEvent::HostStarted {
-                    tunnel: Arc::new(tunnel),
-                    ticket: ticket.to_string(),
-                    events,
-                });
-            }
+        let options = HostOptions::new(port)
+            .secret_key(Some(secret_key))
+            .relay_url(relay_url)
+            .config(config);
+        match service.start_host(options).await {
+            Ok(_) => {}
             Err(e) => {
-                let _ = tx.send(AppEvent::StartFailed(format!("host 启动失败: {e}")));
+                let _ = tx.send(format!("host 启动失败: {e}"));
             }
         }
-    })
+    });
 }
 
 /// 异步启动 join 隧道。
 ///
-/// 票据解析失败时直接发送 `StartFailed`，返回已完成的 handle。
+/// 票据解析失败时直接发送错误文本。
 pub fn spawn_join(
+    service: TunnelService,
     ticket_str: &str,
     port: u16,
     password: Option<String>,
-    tx: mpsc::UnboundedSender<AppEvent>,
-) -> JoinHandle<()> {
+    tx: mpsc::UnboundedSender<String>,
+) {
     let ticket_str = ticket_str.trim().to_owned();
     tokio::spawn(async move {
         let ticket: Ticket = match ticket_str.parse() {
             Ok(t) => t,
             Err(e) => {
-                let _ = tx.send(AppEvent::StartFailed(format!("票据解析失败: {e}")));
+                let _ = tx.send(format!("票据解析失败: {e}"));
                 return;
             }
         };
         let config = JoinConfig::new()
             .event_delay(Duration::ZERO)
             .password(password);
-        match IrohTunnel::join(&ticket, port, config).await {
-            Ok((tunnel, events)) => {
-                let _ = tx.send(AppEvent::JoinConnected {
-                    tunnel: Arc::new(tunnel),
-                    events,
-                });
-            }
+        match service
+            .start_join(JoinOptions::new(ticket, port).config(config))
+            .await
+        {
+            Ok(_) => {}
             Err(e) => {
-                let _ = tx.send(AppEvent::StartFailed(format!("join 失败: {e}")));
-            }
-        }
-    })
-}
-
-/// 异步关闭隧道。
-///
-/// 成功关闭发送 `Closed`，超时则发送 `CloseFailed`，不再混合发送避免状态错乱。
-pub fn spawn_close(tunnel: Arc<IrohTunnel>, tx: mpsc::UnboundedSender<AppEvent>) {
-    tokio::spawn(async move {
-        match tokio::time::timeout(Duration::from_secs(5), tunnel.close()).await {
-            Ok(()) => {
-                let _ = tx.send(AppEvent::Closed);
-            }
-            Err(_) => {
-                let _ = tx.send(AppEvent::CloseFailed("关闭隧道超时 (5s)".to_string()));
+                let _ = tx.send(format!("join 失败: {e}"));
             }
         }
     });
 }
 
-/// 转发事件到 `AppEvent` 通道。
-pub fn spawn_event_forwarder(
-    mut events: mpsc::Receiver<TunnelEvent>,
-    tx: mpsc::UnboundedSender<AppEvent>,
-) -> JoinHandle<()> {
+/// 异步关闭隧道。
+///
+/// 完成状态由 core 快照发布，失败时发送错误文本。
+pub fn spawn_close(service: TunnelService, tx: mpsc::UnboundedSender<String>) {
     tokio::spawn(async move {
-        while let Some(event) = events.recv().await {
-            if tx.send(AppEvent::Tunnel(event)).is_err() {
-                break;
+        match tokio::time::timeout(Duration::from_secs(5), service.shutdown()).await {
+            Ok(Ok(())) => {
+                // The Idle snapshot is the authoritative completion signal.
+            }
+            Ok(Err(e)) => {
+                let _ = tx.send(format!("关闭隧道失败: {e}"));
+            }
+            Err(_) => {
+                let _ = tx.send("关闭隧道超时 (5s)".to_string());
             }
         }
-    })
+    });
 }

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
+use sculk::tunnel::{TunnelMode, TunnelPhase, TunnelUpdate};
 use tokio::sync::mpsc;
 use tokio::time;
 
@@ -24,6 +25,7 @@ pub async fn run_tui() -> anyhow::Result<()> {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let mut state = AppState::new(app_tx);
+    let mut tunnel_updates = state.ctx.tunnel.subscribe();
     let mut event_stream = EventStream::new();
     let mut tick_interval = time::interval(TICK);
 
@@ -44,8 +46,13 @@ pub async fn run_tui() -> anyhow::Result<()> {
                 if key.kind == KeyEventKind::Release { continue }
                 if matches!(state.handle_key(key), Step::Exit) { break }
             }
-            Some(app_event) = app_rx.recv() => {
-                state.handle_app_event(app_event);
+            Some(message) = app_rx.recv() => {
+                state.add_log(&message);
+            }
+            update = tunnel_updates.recv() => {
+                let Some(update) = update else { break };
+                copy_host_ticket(&mut state, &update);
+                state.handle_tunnel_update(update);
             }
             _ = tick_interval.tick() => {
                 state.on_tick();
@@ -54,15 +61,25 @@ pub async fn run_tui() -> anyhow::Result<()> {
     }
 
     // 清理异步资源
-    if let Some(handle) = state.ctx.startup_handle.take() {
-        handle.abort();
-    }
-    if let Some(handle) = state.ctx.event_forwarder.take() {
-        handle.abort();
-    }
-    if let Some(tunnel) = state.ctx.tunnel.take() {
-        let _ = tokio::time::timeout(Duration::from_secs(3), tunnel.close()).await;
-    }
+    let _ = tokio::time::timeout(Duration::from_secs(3), state.ctx.tunnel.shutdown()).await;
 
     Ok(())
+}
+
+fn copy_host_ticket(state: &mut AppState, update: &TunnelUpdate) {
+    let TunnelUpdate::Status(status) = update else {
+        return;
+    };
+    if state.phase == TunnelPhase::Active
+        || status.state.phase != TunnelPhase::Active
+        || status.state.mode != Some(TunnelMode::Host)
+    {
+        return;
+    }
+    let Some(ticket) = status.state.ticket.as_ref() else {
+        return;
+    };
+    if sculk::clipboard::clipboard_copy(&ticket.to_string()) {
+        state.add_log("票据已复制到剪贴板");
+    }
 }

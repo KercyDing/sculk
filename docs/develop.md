@@ -25,8 +25,6 @@ only rel build   # 发布构建
 only rel run     # 运行发布构建
 only rel test    # 发布测试
 only install     # 构建并安装 sckc 和 sckt
-only relay-build # 交叉编译 iroh-relay
-
 cargo fmt --all
 cargo doc --workspace --no-deps --open
 ```
@@ -43,4 +41,4 @@ cargo doc --workspace --no-deps --open
 ## 相关文档
 
 - 安装与使用：[`docs/install.md`](./install.md)
-- Relay 部署：[`docs/deploy.md`](./deploy.md)
+- Relay 部署：[iroh-relay](https://github.com/KercyDing/iroh-relay)

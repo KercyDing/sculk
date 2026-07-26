@@ -66,20 +66,3 @@ pub fn default_key_path() -> Result<PathBuf> {
 pub fn load_or_generate_key(path: &Path) -> Result<sculk::SecretKey> {
     Ok(sculk::persist::load_or_generate_key(path)?)
 }
-
-/// 尝试复制内容到剪贴板。
-///
-/// Purpose: 将剪贴板副作用集中在服务层。
-/// Args: `content` 为待复制文本。
-/// Returns: 成功返回 `true`。
-/// Edge Cases: 测试环境恒为 `false`。
-#[cfg(not(test))]
-pub fn clipboard_copy(content: &str) -> bool {
-    sculk::clipboard::clipboard_copy(content)
-}
-
-/// 测试环境下关闭剪贴板副作用。
-#[cfg(test)]
-pub fn clipboard_copy(_content: &str) -> bool {
-    false
-}

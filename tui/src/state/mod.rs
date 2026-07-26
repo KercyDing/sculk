@@ -18,9 +18,9 @@ mod ui_specs;
 mod view;
 
 pub use footer_spec::{FooterSpec, FooterTone};
+pub use sculk::tunnel::TunnelPhase;
 pub use types::{
     ActiveTab, FocusPane, HostField, InputMode, JoinField, LOG_CAP, RELAYS, Step, TAB_TITLES,
-    TunnelPhase,
 };
 pub use ui_specs::{FieldSpec, HelpLineSpec, PanelSpec, RelayOptionSpec};
 
@@ -74,7 +74,7 @@ impl AppState {
     /// Args: `app_tx` 为应用事件发送端。
     /// Returns: 初始化后的 `AppState`。
     /// Edge Cases: 配置加载失败时回退默认值并写日志。
-    pub fn new(app_tx: mpsc::UnboundedSender<crate::services::tunnel::AppEvent>) -> Self {
+    pub fn new(app_tx: mpsc::UnboundedSender<String>) -> Self {
         let (profile, profile_err) = crate::services::persist::load_profile();
 
         let relay_idx = if profile.relay.custom { 1 } else { 0 };
@@ -134,12 +134,12 @@ impl AppState {
         actions::primary_action(self);
     }
 
-    /// 处理来自隧道任务的内部事件。
-    pub fn handle_app_event(&mut self, event: crate::services::tunnel::AppEvent) {
-        events::handle_app_event(self, event);
+    /// 处理 core 统一订阅发布的隧道更新。
+    pub fn handle_tunnel_update(&mut self, update: sculk::tunnel::TunnelUpdate) {
+        events::handle_tunnel_update(self, update);
     }
 
-    /// 定时刷新：递增 tick、清除超时退出提示、更新连接快照。
+    /// 定时刷新：递增 tick 并清除超时退出提示。
     pub fn on_tick(&mut self) {
         events::on_tick(self);
     }
