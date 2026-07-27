@@ -52,8 +52,6 @@
 //! - `join` 侧是否自动重连由 `JoinConfig::max_retries` 控制。
 //! - 简单集成优先使用 `TunnelService`；需要直接拥有事件接收端时使用 `IrohTunnel`。
 
-#[cfg(feature = "clipboard")]
-pub mod clipboard;
 pub mod error;
 #[cfg(feature = "persist")]
 pub mod persist;

@@ -70,7 +70,6 @@ and its CLI/TUI integrations.
 | Feature | Enabled by default | Description |
 |---|---|---|
 | `persist` | No | Persist keys and user configuration |
-| `clipboard` | No | Write to the system clipboard |
 
 ---
 
@@ -144,7 +143,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Feature | 默认启用 | 说明 |
 |---|---|---|
 | `persist` | 否 | 密钥与用户配置持久化 |
-| `clipboard` | 否 | 写入系统剪贴板 |
 
 ### License / 许可证
 

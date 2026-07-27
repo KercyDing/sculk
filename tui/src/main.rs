@@ -1,6 +1,7 @@
 //! `sckt` 终端界面。
 
 mod app;
+mod clipboard;
 mod input;
 mod keymap;
 mod model;

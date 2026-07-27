@@ -16,6 +16,8 @@ use sculk::tunnel::{
 };
 use tracing_subscriber::EnvFilter;
 
+mod clipboard;
+
 const CLAP_STYLES: clap::builder::styling::Styles = clap::builder::styling::Styles::styled()
     .header(clap::builder::styling::AnsiColor::Yellow.on_default())
     .usage(clap::builder::styling::AnsiColor::Green.on_default())
@@ -154,7 +156,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
                 uri_style.render_reset()
             );
 
-            if sculk::clipboard::clipboard_copy(&quoted) {
+            if clipboard::copy(&quoted) {
                 println!("(Copied to clipboard)");
             }
 

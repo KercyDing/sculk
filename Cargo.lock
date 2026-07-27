@@ -3498,7 +3498,6 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 name = "sculk"
 version = "0.5.0"
 dependencies = [
- "arboard",
  "base64 0.23.0",
  "dirs",
  "futures-util",
@@ -3518,6 +3517,7 @@ name = "sculk-cli"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "clap",
  "sculk",
  "tokio",
@@ -3530,6 +3530,7 @@ name = "sculk-tui"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "crossterm",
  "futures",
  "ratatui",

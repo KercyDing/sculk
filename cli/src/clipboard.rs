@@ -1,9 +1,7 @@
-//! 系统剪贴板写入。
+//! System clipboard integration owned by the CLI application.
 
-/// 将文本写入系统剪贴板，成功返回 `true`。
-///
-/// Linux Wayland 下优先调用 `wl-copy`，X11 下调用 `xclip`，其余平台使用 `arboard`。
-pub fn clipboard_copy(text: &str) -> bool {
+/// Copies text to the system clipboard.
+pub fn copy(text: &str) -> bool {
     #[cfg(target_os = "linux")]
     {
         use std::io::Write;
@@ -19,7 +17,7 @@ pub fn clipboard_copy(text: &str) -> bool {
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());
             }
-            return child.wait().is_ok_and(|s| s.success());
+            return child.wait().is_ok_and(|status| status.success());
         }
 
         if std::env::var_os("DISPLAY").is_some()
@@ -33,11 +31,11 @@ pub fn clipboard_copy(text: &str) -> bool {
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());
             }
-            return child.wait().is_ok_and(|s| s.success());
+            return child.wait().is_ok_and(|status| status.success());
         }
     }
 
     arboard::Clipboard::new()
-        .and_then(|mut cb| cb.set_text(text))
+        .and_then(|mut clipboard| clipboard.set_text(text))
         .is_ok()
 }

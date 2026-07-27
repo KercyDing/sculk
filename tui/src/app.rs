@@ -286,7 +286,7 @@ fn copy_host_uri(state: &mut Model, update: &TunnelUpdate) {
         state.add_log("生成分享 URI 失败");
         return;
     };
-    if sculk::clipboard::clipboard_copy(&uri) {
+    if crate::clipboard::copy(&uri) {
         state.add_log("分享 URI 已复制到剪贴板");
     }
 }
