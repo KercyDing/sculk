@@ -78,6 +78,7 @@ pub(super) async fn reconnect_supervisor(
                 super::emit_event(
                     &tx,
                     TunnelEvent::Error {
+                        category: crate::ErrorCategory::HostUnreachable,
                         message: format!("max retries ({max}) exceeded, giving up"),
                     },
                 );
@@ -113,6 +114,7 @@ pub(super) async fn reconnect_supervisor(
                             super::emit_event(
                                 &tx,
                                 TunnelEvent::Error {
+                                    category: crate::ErrorCategory::AuthorizationDenied,
                                     message: format!("reconnect rejected: {e}"),
                                 },
                             );
@@ -145,6 +147,7 @@ pub(super) async fn reconnect_supervisor(
             super::emit_event(
                 &tx,
                 TunnelEvent::Error {
+                    category: crate::ErrorCategory::Internal,
                     message: e.to_string(),
                 },
             );
@@ -168,6 +171,7 @@ fn spawn_join_accept_loop(
             super::emit_event(
                 &tx,
                 TunnelEvent::Error {
+                    category: crate::ErrorCategory::Internal,
                     message: format!("join loop ended: {e}"),
                 },
             );

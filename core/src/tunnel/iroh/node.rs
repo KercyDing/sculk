@@ -868,8 +868,11 @@ mod tests {
         IrohTunnel::join_direct(uri, node.inner.endpoint.addr(), 0, JoinConfig::default()).await
     }
 
-    #[tokio::test]
-    async fn rejects_non_loopback_targets() {
+    #[test]
+    fn validates_target_address_boundaries() {
+        assert!(validate_target(SocketAddr::from(([127, 0, 0, 1], 1))).is_ok());
+        assert!(validate_target(SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 65535))).is_ok());
+
         let target = "192.168.1.2:25565".parse();
         assert!(target.is_ok());
         let result = validate_target(target.unwrap_or_else(|_| unreachable!()));
@@ -1097,6 +1100,118 @@ mod tests {
         let bridge_closed =
             recv_status_where(&mut status_updates, |status| status.bridge_count == 0).await;
         assert!(bridge_closed.is_some(), "closed bridge status missing");
+        join.close().await;
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_service_and_wrong_token_identically() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service_id = ServiceId::generate();
+        let token = AccessToken::generate();
+        let started = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: token.clone(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(started.is_ok());
+
+        for (requested_service, requested_token) in [
+            (ServiceId::generate(), token.clone()),
+            (service_id, AccessToken::generate()),
+        ] {
+            let uri = JoinUri::new(node.endpoint_id(), requested_service, requested_token, None);
+            let rejected = join_node(&node, &uri).await;
+            assert!(
+                matches!(
+                    rejected,
+                    Err(crate::SculkError::Tunnel(
+                        crate::error::TunnelError::AuthRejectedByHost
+                    ))
+                ),
+                "rejection must use the public authorization error"
+            );
+        }
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn stopping_service_closes_authenticated_connections() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service_id = ServiceId::generate();
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(service.is_ok());
+        let Ok(service) = service else {
+            node.close().await;
+            return;
+        };
+        let uri = service.join_uri().await;
+        assert!(uri.is_ok());
+        let Ok(uri) = uri else {
+            node.close().await;
+            return;
+        };
+        let join = join_node(&node, &uri).await;
+        assert!(join.is_ok());
+        let Ok((join, _)) = join else {
+            node.close().await;
+            return;
+        };
+
+        let connected = async {
+            for _ in 0..100 {
+                if service
+                    .status()
+                    .await
+                    .is_ok_and(|status| status.connection_count == 1)
+                {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            false
+        };
+        assert!(connected.await);
+        assert!(node.stop_service(service_id).await.is_ok());
+
+        let closed = async {
+            for _ in 0..100 {
+                if join
+                    .connections()
+                    .is_ok_and(|connections| connections.is_empty())
+                {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            false
+        };
+        assert!(closed.await, "authenticated connection remained after stop");
+        assert!(matches!(
+            service.status().await,
+            Err(SculkNodeError::ServiceNotFound)
+        ));
+
         join.close().await;
         node.close().await;
     }

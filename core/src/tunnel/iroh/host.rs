@@ -63,6 +63,7 @@ pub(super) async fn host_accept_loop(
                     super::emit_event(
                         &tx,
                         TunnelEvent::Error {
+                            category: crate::ErrorCategory::Internal,
                             message: format!("accept host connection failed: {e}"),
                         },
                     );
@@ -72,6 +73,7 @@ pub(super) async fn host_accept_loop(
                     super::emit_event(
                         &tx,
                         TunnelEvent::Error {
+                            category: crate::ErrorCategory::HostUnreachable,
                             message: "accept host connection timed out".to_string(),
                         },
                     );
@@ -82,6 +84,7 @@ pub(super) async fn host_accept_loop(
                 super::emit_event(
                     &tx,
                     TunnelEvent::Error {
+                        category: crate::ErrorCategory::Internal,
                         message: format!("start host connection failed: {e}"),
                     },
                 );
@@ -194,6 +197,7 @@ pub(super) async fn start_authenticated_host_connection(
             super::emit_event(
                 &tx_left,
                 TunnelEvent::Error {
+                    category: crate::ErrorCategory::Internal,
                     message: e.to_string(),
                 },
             );
@@ -288,6 +292,7 @@ async fn host_handle_conn(
                     super::emit_event(
                         &events,
                         TunnelEvent::Error {
+                            category: crate::ErrorCategory::TargetUnavailable,
                             message: format!("connect target server failed: {e}"),
                         },
                     );
@@ -304,6 +309,7 @@ async fn host_handle_conn(
                 super::emit_event(
                     &events,
                     TunnelEvent::Error {
+                        category: crate::ErrorCategory::Internal,
                         message: format!("bridge ended with an error: {e}"),
                     },
                 );

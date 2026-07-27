@@ -42,10 +42,21 @@ async fn auth_send_inner(
         .map_err(|e| crate::error::TunnelError::WriteAuthPayload(e.into()))?;
     send.finish()
         .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.into()))?;
-    let result = recv
-        .read_to_end(1)
-        .await
-        .map_err(|e| crate::error::TunnelError::ReadAuthResult(e.into()))?;
+    let result = match recv.read_to_end(1).await {
+        Ok(result) => result,
+        Err(error) => {
+            if matches!(
+                conn.close_reason(),
+                Some(ConnectionError::ApplicationClosed(ApplicationClose {
+                    error_code,
+                    ..
+                })) if error_code == CLOSE_AUTH_FAILED
+            ) {
+                return Err(crate::error::TunnelError::AuthRejectedByHost.into());
+            }
+            return Err(crate::error::TunnelError::ReadAuthResult(error.into()).into());
+        }
+    };
     if result.as_slice() == [CONTROL_OK] {
         Ok(())
     } else {

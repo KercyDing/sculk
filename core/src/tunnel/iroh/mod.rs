@@ -163,6 +163,7 @@ impl IrohTunnel {
                 emit_event(
                     &tx,
                     TunnelEvent::Error {
+                        category: crate::ErrorCategory::Internal,
                         message: format!("host loop ended: {e}"),
                     },
                 );

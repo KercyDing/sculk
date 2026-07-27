@@ -260,10 +260,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_extra_uri_components() {
+    fn rejects_non_canonical_uri_structure() {
         let value = join_uri(None).expose_secret_uri().unwrap_or_default();
-        assert!(format!("{value}?x=1").parse::<JoinUri>().is_err());
-        assert!(format!("{value}#x").parse::<JoinUri>().is_err());
+        let encoded = value.rsplit('/').next().unwrap_or_default();
+        for invalid in [
+            format!("http://join/v1/{encoded}"),
+            format!("sculk://other/v1/{encoded}"),
+            format!("sculk://user@join/v1/{encoded}"),
+            format!("sculk://user:password@join/v1/{encoded}"),
+            format!("sculk://join:1234/v1/{encoded}"),
+            format!("sculk://join/v1/{encoded}/"),
+            format!("sculk://join/v1/{encoded}?query"),
+            format!("sculk://join/v1/{encoded}#fragment"),
+        ] {
+            assert!(
+                matches!(
+                    invalid.parse::<JoinUri>(),
+                    Err(JoinUriError::InvalidStructure)
+                ),
+                "unexpected result for {invalid}"
+            );
+        }
     }
 
     #[test]
@@ -382,10 +399,35 @@ mod tests {
             Err(JoinUriError::PayloadTooLong)
         ));
 
-        let oversized = format!("sculk://join/v1/{}", "a".repeat(URI_LEN_MAX));
+        let uri_prefix = "sculk://join/v1/";
+        let limit = format!("{uri_prefix}{}", "a".repeat(URI_LEN_MAX - uri_prefix.len()));
+        assert_eq!(limit.len(), URI_LEN_MAX);
+        assert!(!matches!(
+            limit.parse::<JoinUri>(),
+            Err(JoinUriError::PayloadTooLong)
+        ));
+
+        let oversized = format!("{limit}a");
+        assert_eq!(oversized.len(), URI_LEN_MAX + 1);
         assert!(matches!(
             oversized.parse::<JoinUri>(),
             Err(JoinUriError::PayloadTooLong)
+        ));
+    }
+
+    #[test]
+    fn rejects_padded_or_non_url_safe_base64() {
+        let value = join_uri(None).expose_secret_uri().unwrap_or_default();
+        assert!(matches!(
+            format!("{value}=").parse::<JoinUri>(),
+            Err(JoinUriError::InvalidPayload)
+        ));
+
+        let encoded = value.rsplit('/').next().unwrap_or_default();
+        let invalid = format!("+{}", encoded.get(1..).unwrap_or_default());
+        assert!(matches!(
+            format!("sculk://join/v1/{invalid}").parse::<JoinUri>(),
+            Err(JoinUriError::InvalidPayload)
         ));
     }
 

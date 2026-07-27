@@ -76,6 +76,8 @@ pub struct TunnelStatus {
     pub state: TunnelState,
     /// 查询时仍存活的连接快照。
     pub connections: Vec<ConnectionSnapshot>,
+    /// Most recent structured error observed in the current lifecycle.
+    pub last_error: Option<ErrorCategory>,
 }
 
 impl TunnelStatus {
@@ -83,6 +85,7 @@ impl TunnelStatus {
         Self {
             state: TunnelState::idle(),
             connections: Vec::new(),
+            last_error: None,
         }
     }
 }
@@ -279,6 +282,7 @@ impl TunnelSubscription {
                         Ok(event) => return Some(TunnelUpdate::Event(event)),
                         Err(broadcast::error::RecvError::Lagged(count)) => {
                             return Some(TunnelUpdate::Event(TunnelEvent::Error {
+                                category: ErrorCategory::ResourceLimit,
                                 message: format!(
                                     "event subscriber lagged and lost {count} events"
                                 ),
@@ -490,6 +494,7 @@ impl TunnelService {
         self.publish(TunnelStatus {
             state: TunnelState::pending(TunnelPhase::Starting, mode),
             connections: Vec::new(),
+            last_error: None,
         });
         Ok(OperationGuard::new(self.clone(), operation_id))
     }
@@ -552,6 +557,7 @@ impl TunnelService {
                 self.publish(TunnelStatus {
                     state: TunnelState::pending(TunnelPhase::Stopping, mode),
                     connections: Vec::new(),
+                    last_error: None,
                 });
                 Ok(Some((
                     active,
@@ -600,7 +606,12 @@ impl TunnelService {
     }
 
     fn publish_error(&self, context: &str, error: &TunnelServiceError) {
+        let category = error.category();
+        let mut status = self.status();
+        status.last_error = Some(category);
+        self.publish(status);
         let _ = self.inner.event_tx.send(TunnelEvent::Error {
+            category,
             message: format!("{context}: {error}"),
         });
     }
@@ -710,6 +721,12 @@ impl ActiveTunnel {
                     event = events.recv(), if events_open => {
                         match event {
                             Some(event) => {
+                                if let TunnelEvent::Error { category, .. } = &event
+                                    && status.last_error != Some(*category)
+                                {
+                                    status.last_error = Some(*category);
+                                    status_tx.send_replace(status.clone());
+                                }
                                 let _ = forward_tx.send(event);
                             }
                             None => {
@@ -736,6 +753,7 @@ impl ActiveTunnel {
         Ok(TunnelStatus {
             state: self.state(),
             connections: self.tunnel.connections()?,
+            last_error: None,
         })
     }
 
@@ -916,6 +934,64 @@ mod tests {
                     mode: Some(TunnelMode::Join),
                     ..
                 },
+                ..
+            }))
+        ));
+    }
+
+    #[tokio::test]
+    async fn error_category_is_recoverable_from_status_and_subscription() {
+        let service = TunnelService::new();
+        let mut updates = service.subscribe();
+        assert!(matches!(
+            updates.recv().await,
+            Some(TunnelUpdate::Status(TunnelStatus {
+                last_error: None,
+                ..
+            }))
+        ));
+
+        service.publish_error("validation failed", &TunnelServiceError::InvalidPort);
+
+        assert_eq!(
+            service.status().last_error,
+            Some(ErrorCategory::InvalidConfiguration)
+        );
+        let mut saw_status = false;
+        let mut saw_event = false;
+        for _ in 0..2 {
+            match updates.recv().await {
+                Some(TunnelUpdate::Status(status)) => {
+                    saw_status = status.last_error == Some(ErrorCategory::InvalidConfiguration);
+                }
+                Some(TunnelUpdate::Event(TunnelEvent::Error { category, .. })) => {
+                    saw_event = category == ErrorCategory::InvalidConfiguration;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_status);
+        assert!(saw_event);
+
+        let guard = service.begin_start(TunnelMode::Join).await;
+        assert!(guard.is_ok());
+        assert_eq!(service.status().last_error, None);
+    }
+
+    #[tokio::test]
+    async fn lagged_event_subscription_reports_resource_limit() {
+        let service = TunnelService::new();
+        let mut updates = service.subscribe();
+        assert!(updates.recv().await.is_some());
+
+        for _ in 0..=EVENT_BROADCAST_SIZE {
+            assert!(service.inner.event_tx.send(TunnelEvent::Connected).is_ok());
+        }
+
+        assert!(matches!(
+            updates.recv().await,
+            Some(TunnelUpdate::Event(TunnelEvent::Error {
+                category: ErrorCategory::ResourceLimit,
                 ..
             }))
         ));

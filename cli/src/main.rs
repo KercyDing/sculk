@@ -246,7 +246,7 @@ async fn wait_until_active(
             TunnelUpdate::Status(status) if status.state.phase == TunnelPhase::Idle => {
                 anyhow::bail!("tunnel stopped before becoming active");
             }
-            TunnelUpdate::Event(TunnelEvent::Error { message }) => {
+            TunnelUpdate::Event(TunnelEvent::Error { message, .. }) => {
                 anyhow::bail!("{message}");
             }
             TunnelUpdate::Event(event) => print_event(&event),
@@ -308,7 +308,7 @@ fn print_event(event: &TunnelEvent) {
             let mode = if *is_relay { "relay" } else { "direct" };
             println!("[~] {remote_id} path: {mode}, RTT: {rtt_ms}ms");
         }
-        TunnelEvent::Error { message } => eprintln!("[!] Error: {message}"),
+        TunnelEvent::Error { message, .. } => eprintln!("[!] Error: {message}"),
         TunnelEvent::Reconnecting { attempt } => {
             println!("[~] Reconnecting (attempt {attempt})...")
         }

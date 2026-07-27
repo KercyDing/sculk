@@ -9,6 +9,8 @@ use std::fmt;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use crate::ErrorCategory;
+
 const DEFAULT_LOCAL_SESSIONS_MAX: NonZeroUsize = NonZeroUsize::new(64).unwrap();
 
 /// 对端节点标识，由 `EndpointId::fmt_short()` 生成的短格式。
@@ -157,7 +159,10 @@ pub enum TunnelEvent {
     /// host 侧：连接被主动拒绝，如服务器满员时 `reason` 为 `"server full"`。
     PlayerRejected { id: PeerId, reason: String },
     /// 内部或 I/O 错误；`message` 会说明受影响的运行流程。
-    Error { message: String },
+    Error {
+        category: ErrorCategory,
+        message: String,
+    },
 }
 
 /// 单条连接的瞬时状态快照，由 [`IrohTunnel::connections`](crate::tunnel::IrohTunnel::connections) 返回。
