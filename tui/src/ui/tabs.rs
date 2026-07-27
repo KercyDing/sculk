@@ -4,6 +4,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Tabs};
+use unicode_width::UnicodeWidthStr;
 
 use super::{ACCENT, BG, INFO, WARN, border_style};
 use crate::model::{ActiveTab, FocusPane, HostField, JoinField, Model, RELAYS, TAB_TITLES};
@@ -231,7 +232,7 @@ fn render_field_line(
     value: &str,
     selected: bool,
 ) {
-    let label_width = 8u16;
+    let label_width = field_label_width(label);
     let cols =
         Layout::horizontal([Constraint::Length(label_width), Constraint::Min(4)]).split(area);
 
@@ -267,4 +268,28 @@ fn render_field_line(
         Style::default().fg(Color::Gray).bg(BG)
     };
     frame.render_widget(Paragraph::new(Span::styled(display, value_style)), cols[1]);
+}
+
+fn field_label_width(label: &str) -> u16 {
+    UnicodeWidthStr::width(label)
+        .saturating_add(4)
+        .min(u16::MAX as usize) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::field_label_width;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn join_uri_label_fits_marker_and_suffix() {
+        let label = "分享 URI";
+        let label_width = field_label_width(label);
+
+        assert_eq!(label_width, 12);
+        assert_eq!(
+            usize::from(label_width),
+            UnicodeWidthStr::width(format!("▶ {label}: ").as_str())
+        );
+    }
 }
