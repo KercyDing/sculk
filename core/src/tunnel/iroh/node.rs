@@ -462,6 +462,7 @@ async fn route_connection(node: &SculkNode, conn: Connection) -> crate::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn rejects_non_loopback_targets() {
@@ -533,6 +534,84 @@ mod tests {
         assert!(stopped.is_ok());
         assert_eq!(node.service_count().await, 1);
         assert!(second.join_uri().await.is_ok());
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn joins_and_forwards_to_the_selected_service() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await;
+        assert!(listener.is_ok());
+        let Ok(listener) = listener else {
+            return;
+        };
+        let target_addr = listener.local_addr();
+        assert!(target_addr.is_ok());
+        let Ok(target_addr) = target_addr else {
+            return;
+        };
+        tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut data = [0_u8; 4];
+            if stream.read_exact(&mut data).await.is_ok() {
+                let _ = stream.write_all(&data).await;
+            }
+        });
+
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id: ServiceId::generate(),
+                target_addr,
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(service.is_ok());
+        let Ok(service) = service else {
+            node.close().await;
+            return;
+        };
+        let uri = service.join_uri().await;
+        assert!(uri.is_ok());
+        let Ok(uri) = uri else {
+            node.close().await;
+            return;
+        };
+        let join = IrohTunnel::join(&uri, 0, JoinConfig::default()).await;
+        assert!(join.is_ok());
+        let Ok((join, _)) = join else {
+            node.close().await;
+            return;
+        };
+        let local_addr = join.local_addr();
+        assert!(local_addr.is_some());
+        let Some(local_addr) = local_addr else {
+            join.close().await;
+            node.close().await;
+            return;
+        };
+        let client = tokio::net::TcpStream::connect(local_addr).await;
+        assert!(client.is_ok());
+        let Ok(mut client) = client else {
+            join.close().await;
+            node.close().await;
+            return;
+        };
+        let write = client.write_all(b"ping").await;
+        assert!(write.is_ok());
+        let mut echoed = [0_u8; 4];
+        let read =
+            tokio::time::timeout(Duration::from_secs(5), client.read_exact(&mut echoed)).await;
+        assert!(matches!(read, Ok(Ok(_))));
+        assert_eq!(&echoed, b"ping");
+        join.close().await;
         node.close().await;
     }
 }
