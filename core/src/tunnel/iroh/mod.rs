@@ -14,10 +14,10 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use super::event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent};
-use super::ticket::Ticket;
+use super::join_uri::JoinUri;
 use crate::Result;
 use crate::error::TunnelError;
-use crate::types::{RelayUrl, SecretKey};
+use crate::types::{AccessToken, RelayUrl, SecretKey, ServiceId};
 
 mod auth;
 mod endpoint;
@@ -32,7 +32,7 @@ use host::{HostContext, host_accept_loop};
 use join::{JoinContext, connect_with_retry, reconnect_supervisor};
 use session::HostSessions;
 
-const ALPN: &[u8] = b"/sculk/tunnel/1";
+const ALPN: &[u8] = b"/sculk/node/1";
 const EVENT_CHANNEL_SIZE: usize = 64;
 const CLOSE_AUTH_FAILED: VarInt = VarInt::from_u32(1);
 const CLOSE_SERVER_FULL: VarInt = VarInt::from_u32(2);
@@ -111,16 +111,19 @@ pub struct IrohTunnel {
     created_at: Instant,
     /// 关闭信号发送端。
     shutdown: tokio::sync::watch::Sender<bool>,
+    local_addr: Option<std::net::SocketAddr>,
 }
 
 impl IrohTunnel {
-    /// 创建 host 隧道，返回票据和事件接收端。
+    /// 创建单服务 Host 隧道，返回 Join URI 和事件接收端。
     pub async fn host(
         mc_port: u16,
         secret_key: Option<SecretKey>,
         relay_url: Option<RelayUrl>,
+        service_id: ServiceId,
+        token: AccessToken,
         config: HostConfig,
-    ) -> Result<(Self, Ticket, mpsc::Receiver<TunnelEvent>)> {
+    ) -> Result<(Self, JoinUri, mpsc::Receiver<TunnelEvent>)> {
         let mut builder = build_endpoint(secret_key, relay_url.as_ref());
         builder = builder.alpns(vec![ALPN.to_vec()]);
         let endpoint = builder
@@ -129,7 +132,7 @@ impl IrohTunnel {
             .map_err(|e| TunnelError::BindHostEndpoint(e.into()))?;
         endpoint.online().await;
 
-        let ticket = Ticket::new(endpoint.id(), relay_url);
+        let join_uri = JoinUri::new(endpoint.id(), service_id, token.clone(), relay_url);
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let conns: Arc<Mutex<Vec<TrackedConnection>>> = Arc::new(Mutex::new(Vec::new()));
         let sessions: Arc<Mutex<HostSessions>> = Arc::new(Mutex::new(HostSessions::default()));
@@ -143,7 +146,8 @@ impl IrohTunnel {
                 conns: conns_clone,
                 sessions: sessions_clone,
                 event_delay: config.event_delay,
-                password: config.password,
+                service_id,
+                token,
                 max_players: config.max_players,
             });
             if let Err(e) = host_accept_loop(ep, mc_port, tx.clone(), ctx, shutdown_rx).await {
@@ -162,19 +166,20 @@ impl IrohTunnel {
                 conns,
                 created_at: Instant::now(),
                 shutdown,
+                local_addr: None,
             },
-            ticket,
+            join_uri,
             rx,
         ))
     }
 
-    /// 通过票据加入 host，返回事件接收端。
+    /// 通过 Join URI 加入 host，返回事件接收端。
     pub async fn join(
-        ticket: &Ticket,
+        join_uri: &JoinUri,
         local_port: u16,
         config: JoinConfig,
     ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
-        let endpoint = build_endpoint(None, ticket.relay_url.as_ref())
+        let endpoint = build_endpoint(None, join_uri.relay_url())
             .bind()
             .await
             .map_err(|e| TunnelError::BindJoinEndpoint(e.into()))?;
@@ -182,7 +187,15 @@ impl IrohTunnel {
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let conns: Arc<Mutex<Vec<TrackedConnection>>> = Arc::new(Mutex::new(Vec::new()));
 
-        let conn = connect_with_retry(&endpoint, ticket.endpoint_id, &config, &tx).await?;
+        let conn = connect_with_retry(
+            &endpoint,
+            join_uri.endpoint_id(),
+            join_uri.service_id(),
+            join_uri.token(),
+            &config,
+            &tx,
+        )
+        .await?;
 
         lock_mutex(&conns, "join connections")?.push(TrackedConnection::new(&conn));
         emit_event(&tx, TunnelEvent::Connected);
@@ -192,11 +205,16 @@ impl IrohTunnel {
                 .await
                 .map_err(|e| TunnelError::BindLocalListener(e.into()))?,
         );
-        tracing::info!(local_port, "listening for MC clients");
+        let local_addr = listener
+            .local_addr()
+            .map_err(|e| TunnelError::BindLocalListener(e.into()))?;
+        tracing::info!(%local_addr, "listening for MC clients");
 
         let ep = endpoint.clone();
         let conns_clone = conns.clone();
-        let endpoint_id = ticket.endpoint_id;
+        let endpoint_id = join_uri.endpoint_id();
+        let service_id = join_uri.service_id();
+        let token = join_uri.token().clone();
 
         let (shutdown, shutdown_rx) = watch::channel(false);
         tokio::spawn(async move {
@@ -204,6 +222,8 @@ impl IrohTunnel {
                 listener,
                 conns: conns_clone,
                 config,
+                service_id,
+                token,
                 shutdown: shutdown_rx,
             };
             reconnect_supervisor(ep, endpoint_id, conn, tx, ctx).await;
@@ -215,6 +235,7 @@ impl IrohTunnel {
                 conns,
                 created_at: Instant::now(),
                 shutdown,
+                local_addr: Some(local_addr),
             },
             rx,
         ))
@@ -234,6 +255,11 @@ impl IrohTunnel {
     /// 返回本机 EndpointId。
     pub fn local_id(&self) -> String {
         self.endpoint.id().to_string()
+    }
+
+    /// 返回 Join 本地监听地址；Host 隧道返回 `None`。
+    pub fn local_addr(&self) -> Option<std::net::SocketAddr> {
+        self.local_addr
     }
 
     /// 关闭隧道。先通知后台任务退出，再关闭 endpoint。
@@ -332,6 +358,7 @@ mod tests {
             conns: Arc::new(Mutex::new(Vec::new())),
             created_at: Instant::now(),
             shutdown,
+            local_addr: None,
         };
 
         drop(tunnel);

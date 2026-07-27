@@ -5,12 +5,15 @@ use super::*;
 use super::auth::auth_send;
 use super::monitor::spawn_path_monitor;
 use super::transport::bridge;
+use crate::types::{AccessToken, ServiceId};
 
 /// Join 重连 supervisor 的运行时上下文。
 pub(super) struct JoinContext {
     pub(super) listener: Arc<TcpListener>,
     pub(super) conns: Arc<Mutex<Vec<TrackedConnection>>>,
     pub(super) config: JoinConfig,
+    pub(super) service_id: ServiceId,
+    pub(super) token: AccessToken,
     /// 关闭信号：为 true 或 sender 被丢弃时，supervisor 应立即退出。
     pub(super) shutdown: tokio::sync::watch::Receiver<bool>,
 }
@@ -99,9 +102,7 @@ pub(super) async fn reconnect_supervisor(
 
             match endpoint.connect(endpoint_id, ALPN).await {
                 Ok(new_conn) => {
-                    if let Some(ref password) = ctx.config.password
-                        && let Err(e) = auth_send(&new_conn, password).await
-                    {
+                    if let Err(e) = auth_send(&new_conn, ctx.service_id, &ctx.token).await {
                         tracing::warn!(attempt, "reconnect auth failed: {e}");
                         if is_permanent_auth_error(&e, &new_conn) {
                             super::emit_event(
@@ -196,6 +197,8 @@ fn is_auth_rejected(err: &crate::error::SculkError) -> bool {
 pub(super) async fn connect_with_retry(
     endpoint: &Endpoint,
     endpoint_id: iroh::EndpointId,
+    service_id: ServiceId,
+    token: &AccessToken,
     config: &JoinConfig,
     tx: &mpsc::Sender<TunnelEvent>,
 ) -> crate::Result<Connection> {
@@ -219,9 +222,7 @@ pub(super) async fn connect_with_retry(
 
         match endpoint.connect(endpoint_id, ALPN).await {
             Ok(conn) => {
-                if let Some(ref password) = config.password {
-                    auth_send(&conn, password).await?;
-                }
+                auth_send(&conn, service_id, token).await?;
                 tracing::info!("connected to host");
                 return Ok(conn);
             }

@@ -136,12 +136,10 @@ fn active_input(model: &mut Model) -> &mut InputField {
     match model.tab {
         ActiveTab::Host => match model.host_field {
             HostField::Port => &mut model.host_port,
-            HostField::Password => &mut model.host_password,
         },
         ActiveTab::Join => match model.join_field {
-            JoinField::Ticket => &mut model.join_ticket,
+            JoinField::Uri => &mut model.join_uri,
             JoinField::Port => &mut model.join_port,
-            JoinField::Password => &mut model.join_password,
         },
         ActiveTab::Relay => &mut model.relay_url,
     }
@@ -149,11 +147,11 @@ fn active_input(model: &mut Model) -> &mut InputField {
 
 fn next_field(model: &mut Model) {
     match model.tab {
-        ActiveTab::Host => model.host_field = HostField::Password,
+        ActiveTab::Host => model.host_field = HostField::Port,
         ActiveTab::Join => {
             model.join_field = match model.join_field {
-                JoinField::Ticket => JoinField::Port,
-                JoinField::Port | JoinField::Password => JoinField::Password,
+                JoinField::Uri => JoinField::Port,
+                JoinField::Port => JoinField::Uri,
             };
         }
         ActiveTab::Relay => {}
@@ -165,8 +163,8 @@ fn previous_field(model: &mut Model) {
         ActiveTab::Host => model.host_field = HostField::Port,
         ActiveTab::Join => {
             model.join_field = match model.join_field {
-                JoinField::Ticket | JoinField::Port => JoinField::Ticket,
-                JoinField::Password => JoinField::Port,
+                JoinField::Uri => JoinField::Port,
+                JoinField::Port => JoinField::Uri,
             };
         }
         ActiveTab::Relay => {}

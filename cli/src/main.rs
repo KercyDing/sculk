@@ -1,8 +1,8 @@
 //! sckc 命令行工具（CLI）。
 //!
 //! 用法：
-//! - `sckc host`：创建房间并生成连接票据（ticket）
-//! - `sckc join "<ticket>"`：通过票据加入房间（注意给 ticket 加引号）
+//! - `sckc host`：创建房间并生成分享 URI
+//! - `sckc join "<uri>"`：通过分享 URI 加入房间
 //! - `sckc relay`：管理自定义 relay 配置
 
 use std::path::PathBuf;
@@ -11,8 +11,8 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use sculk::persist::{self, Profile};
 use sculk::tunnel::{
-    HostConfig, HostOptions, JoinConfig, JoinOptions, TunnelEvent, TunnelMode, TunnelPhase,
-    TunnelService, TunnelStatus, TunnelSubscription, TunnelUpdate,
+    HostConfig, HostOptions, JoinConfig, JoinOptions, JoinUri, LocalPort, TunnelEvent, TunnelMode,
+    TunnelPhase, TunnelService, TunnelStatus, TunnelSubscription, TunnelUpdate,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -58,26 +58,20 @@ enum Commands {
         /// Path status interval in seconds; 0 reports changes only
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
-        /// Require this connection password
-        #[arg(long)]
-        password: Option<String>,
         /// Maximum number of connected players
         #[arg(long)]
         max_players: Option<u32>,
     },
-    /// Join a room with a connection ticket
+    /// Join a room with a share URI
     Join {
-        /// Connection ticket provided by the host
-        ticket: String,
+        /// Share URI provided by the host
+        join_uri: String,
         /// Local port for the Minecraft client
-        #[arg(short, long, default_value_t = sculk::DEFAULT_INLET_PORT)]
-        port: u16,
+        #[arg(short, long)]
+        port: Option<std::num::NonZeroU16>,
         /// Path status interval in seconds; 0 reports changes only
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
-        /// Connection password required by the host
-        #[arg(long)]
-        password: Option<String>,
         /// Maximum reconnection attempts; unlimited by default
         #[arg(long)]
         max_retries: Option<u32>,
@@ -119,7 +113,6 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             key_path,
             relay,
             delay,
-            password,
             max_players,
         } => {
             let path = match key_path {
@@ -137,7 +130,6 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             let relay_url = profile.resolve_relay_url(relay.as_deref())?;
             let config = HostConfig::new()
                 .event_delay(Duration::from_secs(delay))
-                .password(password)
                 .max_players(max_players);
 
             service
@@ -149,17 +141,17 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
                 )
                 .await?;
             let status = wait_until_active(&mut updates, TunnelMode::Host).await?;
-            let ticket = status
+            let join_uri = status
                 .state
-                .ticket
-                .ok_or_else(|| anyhow::anyhow!("host started without a ticket"))?;
-            let ticket_str = ticket.to_string();
-            let quoted = format!("\"{ticket_str}\"");
-            let ticket_style = *CLAP_STYLES.get_literal();
+                .join_uri
+                .ok_or_else(|| anyhow::anyhow!("host started without a Join URI"))?;
+            let uri = join_uri.expose_secret_uri()?;
+            let quoted = format!("\"{uri}\"");
+            let uri_style = *CLAP_STYLES.get_literal();
             println!(
-                "Ticket: {}{quoted}{}",
-                ticket_style.render(),
-                ticket_style.render_reset()
+                "Join URI: {}{quoted}{}",
+                uri_style.render(),
+                uri_style.render_reset()
             );
 
             if sculk::clipboard::clipboard_copy(&quoted) {
@@ -168,7 +160,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
 
             let hint_style = *CLAP_STYLES.get_valid();
             println!(
-                "{}Share this ticket with players.{}",
+                "{}Share this URI with players.{}",
                 hint_style.render(),
                 hint_style.render_reset()
             );
@@ -177,28 +169,33 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             wait_for_shutdown(&service, updates).await?;
         }
         Commands::Join {
-            ticket,
+            join_uri,
             port,
             delay,
-            password,
             max_retries,
         } => {
-            let ticket: sculk::tunnel::Ticket =
-                ticket.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
-            if let Some(ref url) = ticket.relay_url {
+            let join_uri: JoinUri = join_uri.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
+            if let Some(url) = join_uri.relay_url() {
                 println!("Relay: {url}");
             }
 
             let config = JoinConfig::new()
                 .event_delay(Duration::from_secs(delay))
-                .password(password)
                 .max_retries(max_retries);
 
             service
-                .start_join(JoinOptions::new(ticket, port).config(config))
+                .start_join(
+                    JoinOptions::new(join_uri)
+                        .local_port(port.map_or(LocalPort::Auto, LocalPort::Fixed))
+                        .config(config),
+                )
                 .await?;
-            wait_until_active(&mut updates, TunnelMode::Join).await?;
-            println!("Tunnel running. Connect MC client to 127.0.0.1:{port}");
+            let status = wait_until_active(&mut updates, TunnelMode::Join).await?;
+            let local_addr = status
+                .state
+                .local_addr
+                .ok_or_else(|| anyhow::anyhow!("join started without a local listener"))?;
+            println!("Tunnel running. Connect MC client to {local_addr}");
             println!("Press Ctrl+C to stop.");
 
             wait_for_shutdown(&service, updates).await?;
@@ -338,11 +335,9 @@ mod tests {
 
     #[test]
     fn parse_join_defaults() {
-        let cli_res = Cli::try_parse_from(["sckc", "join", "ticket"]);
+        let cli_res = Cli::try_parse_from(["sckc", "join", "sculk://join/v1/payload"]);
         assert!(cli_res.is_ok(), "parse join");
         let cli = if let Ok(v) = cli_res { v } else { return };
-        assert!(
-            matches!(cli.command, Commands::Join { port, .. } if port == sculk::DEFAULT_INLET_PORT)
-        );
+        assert!(matches!(cli.command, Commands::Join { port: None, .. }));
     }
 }

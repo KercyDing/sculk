@@ -22,7 +22,7 @@ version.workspace = true
 [features]
 default = []
 clipboard = ["dep:arboard"]
-persist = ["dep:dirs", "dep:rand", "dep:serde", "dep:toml"]
+persist = ["dep:dirs", "dep:serde", "dep:toml"]
 
 [dependencies]
 futures-util.workspace = true
@@ -32,9 +32,10 @@ tracing.workspace = true
 url.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
+rand.workspace = true
+base64.workspace = true
 arboard = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 

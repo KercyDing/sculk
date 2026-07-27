@@ -86,7 +86,7 @@ pub fn render_help_popup(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Mod
     lines.extend([
         Line::raw(""),
         Line::raw("建房 Enter 启动/停止隧道，"),
-        Line::raw("票据自动复制到剪贴板。"),
+        Line::raw("分享 URI 会自动复制到剪贴板。"),
     ]);
 
     let help = Paragraph::new(Text::from(lines));
@@ -311,41 +311,27 @@ fn edit_fields(model: &Model) -> (&'static str, Vec<EditField<'_>>) {
     match model.tab {
         ActiveTab::Host => (
             "编辑 · 建房配置",
-            vec![
-                EditField {
-                    label: model.host_port.label,
-                    value: &model.host_port.value,
-                    cursor: model.host_port.cursor,
-                    active: model.host_field == HostField::Port,
-                },
-                EditField {
-                    label: model.host_password.label,
-                    value: &model.host_password.value,
-                    cursor: model.host_password.cursor,
-                    active: model.host_field == HostField::Password,
-                },
-            ],
+            vec![EditField {
+                label: model.host_port.label,
+                value: &model.host_port.value,
+                cursor: model.host_port.cursor,
+                active: model.host_field == HostField::Port,
+            }],
         ),
         ActiveTab::Join => (
             "编辑 · 加入配置",
             vec![
                 EditField {
-                    label: model.join_ticket.label,
-                    value: &model.join_ticket.value,
-                    cursor: model.join_ticket.cursor,
-                    active: model.join_field == JoinField::Ticket,
+                    label: model.join_uri.label,
+                    value: &model.join_uri.value,
+                    cursor: model.join_uri.cursor,
+                    active: model.join_field == JoinField::Uri,
                 },
                 EditField {
                     label: model.join_port.label,
                     value: &model.join_port.value,
                     cursor: model.join_port.cursor,
                     active: model.join_field == JoinField::Port,
-                },
-                EditField {
-                    label: model.join_password.label,
-                    value: &model.join_password.value,
-                    cursor: model.join_password.cursor,
-                    active: model.join_field == JoinField::Password,
                 },
             ],
         ),

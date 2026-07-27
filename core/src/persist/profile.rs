@@ -42,9 +42,6 @@ pub struct JoinProfile {
     /// 本地入站监听端口，默认 [`DEFAULT_INLET_PORT`](crate::DEFAULT_INLET_PORT)。
     #[serde(default = "default_inlet_port")]
     pub port: u16,
-    /// 上次成功加入的票据，序列化时若为 `None` 则省略。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_ticket: Option<String>,
 }
 
 /// relay 偏好配置，对应 `[relay]` TOML 节。
@@ -70,7 +67,6 @@ impl Default for JoinProfile {
     fn default() -> Self {
         Self {
             port: default_inlet_port(),
-            last_ticket: None,
         }
     }
 }
@@ -282,7 +278,6 @@ mod tests {
         let p = Profile::default();
         assert_eq!(p.host.port, crate::DEFAULT_MC_PORT);
         assert_eq!(p.join.port, crate::DEFAULT_INLET_PORT);
-        assert!(p.join.last_ticket.is_none());
         assert!(!p.relay.custom);
         assert!(p.relay.url.is_none());
     }
@@ -291,7 +286,6 @@ mod tests {
     fn toml_roundtrip() {
         let mut p = Profile::default();
         p.host.port = 12345;
-        p.join.last_ticket = Some("sculk://test".to_string());
         p.relay.custom = true;
         p.relay.url = Some("https://relay.example.com".to_string());
 
@@ -303,7 +297,6 @@ mod tests {
         let p2 = if let Ok(v) = p2_res { v } else { return };
 
         assert_eq!(p2.host.port, 12345);
-        assert_eq!(p2.join.last_ticket.as_deref(), Some("sculk://test"));
         assert!(p2.relay.custom);
         assert_eq!(p2.relay.url.as_deref(), Some("https://relay.example.com"));
     }

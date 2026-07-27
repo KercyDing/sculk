@@ -82,11 +82,6 @@ impl InputField {
     pub fn move_end(&mut self) {
         self.cursor = self.value.len();
     }
-
-    pub fn clear(&mut self) {
-        self.value.clear();
-        self.cursor = 0;
-    }
 }
 
 #[cfg(test)]

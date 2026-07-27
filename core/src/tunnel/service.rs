@@ -3,14 +3,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::{net::SocketAddr, num::NonZeroU16};
 
 use thiserror::Error;
 use tokio::sync::{Mutex, broadcast, watch};
 use tokio::task::JoinHandle;
 
 use super::{
-    ConnectionSnapshot, HostConfig, IrohTunnel, JoinConfig, RelayUrl, SecretKey, Ticket,
-    TunnelEvent,
+    AccessToken, ConnectionSnapshot, HostConfig, IrohTunnel, JoinConfig, JoinUri, RelayUrl,
+    SecretKey, ServiceId, TunnelEvent,
 };
 use crate::SculkError;
 
@@ -41,8 +42,10 @@ pub struct TunnelState {
     pub phase: TunnelPhase,
     /// 正在启动、运行或关闭的角色；空闲时为 `None`。
     pub mode: Option<TunnelMode>,
-    /// Host 活动时可分享的票据。
-    pub ticket: Option<Ticket>,
+    /// Host 活动时可分享的 Join URI。
+    pub join_uri: Option<JoinUri>,
+    /// Join 活动时实际绑定的本地监听地址。
+    pub local_addr: Option<SocketAddr>,
 }
 
 impl TunnelState {
@@ -50,7 +53,8 @@ impl TunnelState {
         Self {
             phase: TunnelPhase::Idle,
             mode: None,
-            ticket: None,
+            join_uri: None,
+            local_addr: None,
         }
     }
 
@@ -58,7 +62,8 @@ impl TunnelState {
         Self {
             phase,
             mode: Some(mode),
-            ticket: None,
+            join_uri: None,
+            local_addr: None,
         }
     }
 }
@@ -67,7 +72,7 @@ impl TunnelState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TunnelStatus {
-    /// 生命周期、角色与票据快照。
+    /// 生命周期、角色与 Join URI 快照。
     pub state: TunnelState,
     /// 查询时仍存活的连接快照。
     pub connections: Vec<ConnectionSnapshot>,
@@ -92,6 +97,10 @@ pub struct HostOptions {
     pub secret_key: Option<SecretKey>,
     /// 自定义中继；`None` 表示使用 iroh 默认中继。
     pub relay_url: Option<RelayUrl>,
+    /// 服务标识。由实例管理层在创建服务时生成并持久化。
+    pub service_id: ServiceId,
+    /// 当前 Host 会话的访问令牌。
+    pub token: AccessToken,
     /// Host 行为配置。
     pub config: HostConfig,
 }
@@ -103,6 +112,8 @@ impl HostOptions {
             mc_port,
             secret_key: None,
             relay_url: None,
+            service_id: ServiceId::generate(),
+            token: AccessToken::generate(),
             config: HostConfig::default(),
         }
     }
@@ -119,6 +130,18 @@ impl HostOptions {
         self
     }
 
+    /// 设置服务标识。
+    pub fn service_id(mut self, service_id: ServiceId) -> Self {
+        self.service_id = service_id;
+        self
+    }
+
+    /// 设置当前会话访问令牌。
+    pub fn token(mut self, token: AccessToken) -> Self {
+        self.token = token;
+        self
+    }
+
     /// 设置 Host 行为配置。
     pub fn config(mut self, config: HostConfig) -> Self {
         self.config = config;
@@ -130,28 +153,52 @@ impl HostOptions {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct JoinOptions {
-    /// Host 分享的连接票据。
-    pub ticket: Ticket,
+    /// Host 分享的完整 Join URI。
+    pub join_uri: JoinUri,
     /// 本地 Minecraft 客户端连接端口。
-    pub local_port: u16,
+    pub local_port: LocalPort,
     /// Join 行为配置。
     pub config: JoinConfig,
 }
 
 impl JoinOptions {
-    /// 使用指定票据和本地监听端口创建默认 Join 参数。
-    pub fn new(ticket: Ticket, local_port: u16) -> Self {
+    /// 使用 Join URI 创建自动分配本地端口的参数。
+    pub fn new(join_uri: JoinUri) -> Self {
         Self {
-            ticket,
-            local_port,
+            join_uri,
+            local_port: LocalPort::Auto,
             config: JoinConfig::default(),
         }
+    }
+
+    /// 设置本地监听端口；默认自动分配。
+    pub fn local_port(mut self, local_port: LocalPort) -> Self {
+        self.local_port = local_port;
+        self
     }
 
     /// 设置 Join 行为配置。
     pub fn config(mut self, config: JoinConfig) -> Self {
         self.config = config;
         self
+    }
+}
+
+/// Join 本地 TCP 监听端口策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalPort {
+    /// 由操作系统自动分配可用端口。
+    Auto,
+    /// 绑定指定的非零端口。
+    Fixed(NonZeroU16),
+}
+
+impl LocalPort {
+    fn value(self) -> u16 {
+        match self {
+            Self::Auto => 0,
+            Self::Fixed(port) => port.get(),
+        }
     }
 }
 
@@ -265,7 +312,7 @@ enum ServiceState {
 
 struct ActiveTunnel {
     mode: TunnelMode,
-    ticket: Option<Ticket>,
+    join_uri: Option<JoinUri>,
     tunnel: Arc<IrohTunnel>,
     events: Option<tokio::sync::mpsc::Receiver<TunnelEvent>>,
     event_task: Option<JoinHandle<()>>,
@@ -321,13 +368,15 @@ impl TunnelService {
             options.mc_port,
             options.secret_key,
             options.relay_url,
+            options.service_id,
+            options.token,
             options.config,
         )
         .await;
 
         match result {
-            Ok((tunnel, ticket, events)) => {
-                let active = ActiveTunnel::new(TunnelMode::Host, Some(ticket), tunnel, events);
+            Ok((tunnel, join_uri, events)) => {
+                let active = ActiveTunnel::new(TunnelMode::Host, Some(join_uri), tunnel, events);
                 self.finish_start(guard, active).await
             }
             Err(error) => {
@@ -361,7 +410,12 @@ impl TunnelService {
         options: JoinOptions,
         guard: OperationGuard,
     ) -> Result<TunnelStatus, TunnelServiceError> {
-        let result = IrohTunnel::join(&options.ticket, options.local_port, options.config).await;
+        let result = IrohTunnel::join(
+            &options.join_uri,
+            options.local_port.value(),
+            options.config,
+        )
+        .await;
 
         match result {
             Ok((tunnel, events)) => {
@@ -600,13 +654,13 @@ impl Drop for OperationGuard {
 impl ActiveTunnel {
     fn new(
         mode: TunnelMode,
-        ticket: Option<Ticket>,
+        join_uri: Option<JoinUri>,
         tunnel: IrohTunnel,
         events: tokio::sync::mpsc::Receiver<TunnelEvent>,
     ) -> Self {
         Self {
             mode,
-            ticket,
+            join_uri,
             tunnel: Arc::new(tunnel),
             events: Some(events),
             event_task: None,
@@ -662,7 +716,8 @@ impl ActiveTunnel {
         TunnelState {
             phase: TunnelPhase::Active,
             mode: Some(self.mode),
-            ticket: self.ticket.clone(),
+            join_uri: self.join_uri.clone(),
+            local_addr: self.tunnel.local_addr(),
         }
     }
 
@@ -704,10 +759,7 @@ fn validate_host_options(options: &HostOptions) -> Result<(), TunnelServiceError
     Ok(())
 }
 
-fn validate_join_options(options: &JoinOptions) -> Result<(), TunnelServiceError> {
-    if options.local_port == 0 {
-        return Err(TunnelServiceError::InvalidPort);
-    }
+fn validate_join_options(_options: &JoinOptions) -> Result<(), TunnelServiceError> {
     Ok(())
 }
 

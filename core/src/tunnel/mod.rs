@@ -5,15 +5,15 @@
 
 mod event;
 mod iroh;
+mod join_uri;
 mod service;
-mod ticket;
 
-pub use crate::types::{RelayUrl, SecretKey};
+pub use crate::types::{AccessToken, RelayUrl, SecretKey, ServiceId};
 pub use ::iroh::EndpointId;
 pub use event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent};
 pub use iroh::IrohTunnel;
+pub use join_uri::JoinUri;
 pub use service::{
-    HostOptions, JoinOptions, TunnelMode, TunnelPhase, TunnelService, TunnelServiceError,
-    TunnelState, TunnelStatus, TunnelSubscription, TunnelUpdate,
+    HostOptions, JoinOptions, LocalPort, TunnelMode, TunnelPhase, TunnelService,
+    TunnelServiceError, TunnelState, TunnelStatus, TunnelSubscription, TunnelUpdate,
 };
-pub use ticket::Ticket;

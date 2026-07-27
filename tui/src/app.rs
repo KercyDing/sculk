@@ -6,7 +6,7 @@ use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use sculk::persist::Profile;
 use sculk::tunnel::{
-    HostConfig, HostOptions, JoinConfig, JoinOptions, Ticket, TunnelMode, TunnelPhase,
+    HostConfig, HostOptions, JoinConfig, JoinOptions, JoinUri, LocalPort, TunnelMode, TunnelPhase,
     TunnelService, TunnelUpdate,
 };
 use tokio::task::JoinSet;
@@ -51,8 +51,7 @@ pub async fn run_tui() -> anyhow::Result<()> {
             }
             update = tunnel_updates.recv() => {
                 let Some(update) = update else { break };
-                copy_host_ticket(&mut model, &update);
-                remember_join_ticket(&mut model, &mut profile, &update);
+                copy_host_uri(&mut model, &update);
                 model.handle_tunnel_update(update);
             }
             _ = tick_interval.tick() => {
@@ -141,10 +140,7 @@ async fn toggle_host(
             return;
         }
     };
-    let password = non_empty(&state.host_password.value);
-    let config = HostConfig::new()
-        .event_delay(Duration::ZERO)
-        .password(password);
+    let config = HostConfig::new().event_delay(Duration::ZERO);
     let options = HostOptions::new(port)
         .secret_key(Some(secret_key))
         .relay_url(relay_url)
@@ -174,28 +170,30 @@ async fn toggle_join(
         }
     }
 
-    let ticket = match state.join_ticket.value.trim().parse::<Ticket>() {
-        Ok(ticket) => ticket,
+    let join_uri = match state.join_uri.value.trim().parse::<JoinUri>() {
+        Ok(join_uri) => join_uri,
         Err(e) => {
-            state.add_log(&format!("票据解析失败: {e}"));
+            state.add_log(&format!("分享 URI 解析失败: {e}"));
             return;
         }
     };
-    let port = match state.join_port.value.parse::<u16>() {
+    let port = match state.join_port.value.parse::<std::num::NonZeroU16>() {
         Ok(port) => port,
         Err(_) => {
             state.add_log("端口格式错误");
             return;
         }
     };
-    let config = JoinConfig::new()
-        .event_delay(Duration::ZERO)
-        .password(non_empty(&state.join_password.value));
+    let config = JoinConfig::new().event_delay(Duration::ZERO);
 
     state.quit_pressed_at = None;
     state.add_log("正在连接...");
     if let Err(e) = service
-        .start_join(JoinOptions::new(ticket, port).config(config))
+        .start_join(
+            JoinOptions::new(join_uri)
+                .local_port(LocalPort::Fixed(port))
+                .config(config),
+        )
         .await
     {
         state.add_log(&format!("join 失败: {e}"));
@@ -264,21 +262,6 @@ fn save_inputs(state: &mut Model, profile: &mut Profile) {
     }
 }
 
-fn remember_join_ticket(state: &mut Model, profile: &mut Profile, update: &TunnelUpdate) {
-    let TunnelUpdate::Status(status) = update else {
-        return;
-    };
-    if state.tunnel.state.phase == TunnelPhase::Starting
-        && status.state.phase == TunnelPhase::Active
-        && status.state.mode == Some(TunnelMode::Join)
-    {
-        profile.join.last_ticket = Some(state.join_ticket.value.clone());
-        if let Err(e) = profile.save() {
-            state.add_log(&format!("配置保存失败: {e}"));
-        }
-    }
-}
-
 fn load_profile() -> (Profile, Option<String>) {
     match Profile::load() {
         Ok(profile) => (profile, None),
@@ -286,11 +269,7 @@ fn load_profile() -> (Profile, Option<String>) {
     }
 }
 
-fn non_empty(value: &str) -> Option<String> {
-    (!value.is_empty()).then(|| value.to_owned())
-}
-
-fn copy_host_ticket(state: &mut Model, update: &TunnelUpdate) {
+fn copy_host_uri(state: &mut Model, update: &TunnelUpdate) {
     let TunnelUpdate::Status(status) = update else {
         return;
     };
@@ -300,10 +279,14 @@ fn copy_host_ticket(state: &mut Model, update: &TunnelUpdate) {
     {
         return;
     }
-    let Some(ticket) = status.state.ticket.as_ref() else {
+    let Some(join_uri) = status.state.join_uri.as_ref() else {
         return;
     };
-    if sculk::clipboard::clipboard_copy(&ticket.to_string()) {
-        state.add_log("票据已复制到剪贴板");
+    let Ok(uri) = join_uri.expose_secret_uri() else {
+        state.add_log("生成分享 URI 失败");
+        return;
+    };
+    if sculk::clipboard::clipboard_copy(&uri) {
+        state.add_log("分享 URI 已复制到剪贴板");
     }
 }

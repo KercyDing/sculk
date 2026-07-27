@@ -42,25 +42,23 @@ pub enum PersistError {
     RelayUrlParse(String),
 }
 
-/// 票据解析错误。
+/// Join URI 编解码错误。
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum TicketError {
+pub enum JoinUriError {
     /// URL 解析失败。
     #[error(transparent)]
     UrlParse(#[from] url::ParseError),
-    /// 协议不匹配。
-    #[error("invalid scheme: expected \"{expected}\", got \"{actual}\"")]
-    InvalidScheme {
-        expected: &'static str,
-        actual: String,
-    },
-    /// 缺少 endpoint id。
-    #[error("missing endpoint id in ticket URL")]
-    MissingEndpointId,
-    /// endpoint id 非法。
-    #[error("invalid endpoint id: {0}")]
-    EndpointIdParse(String),
+    #[error("invalid Join URI structure")]
+    InvalidStructure,
+    #[error("unsupported Join URI version")]
+    UnsupportedVersion,
+    #[error("invalid Join URI payload")]
+    InvalidPayload,
+    #[error("Join URI payload is too long")]
+    PayloadTooLong,
+    #[error("Join URI contains unsupported flags")]
+    UnsupportedFlags,
     /// relay URL 非法。
     #[error("invalid relay URL: {0}")]
     RelayUrlParse(String),
@@ -142,9 +140,9 @@ pub enum SculkError {
     /// 持久化错误。
     #[error(transparent)]
     Persist(#[from] PersistError),
-    /// 票据错误。
+    /// Join URI 错误。
     #[error(transparent)]
-    Ticket(#[from] TicketError),
+    JoinUri(#[from] JoinUriError),
     /// 隧道错误。
     #[error(transparent)]
     Tunnel(#[from] TunnelError),

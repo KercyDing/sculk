@@ -36,8 +36,6 @@ impl AsRef<str> for PeerId {
 pub struct HostConfig {
     /// `PathChanged` 发送策略：`ZERO` 仅变化时发送，非零按间隔发送。
     pub event_delay: Duration,
-    /// 连接密码，`None` 表示不校验。
-    pub password: Option<String>,
     /// 最大玩家数（按唯一 `EndpointId` 计）。
     pub max_players: Option<u32>,
 }
@@ -52,11 +50,6 @@ impl HostConfig {
         self
     }
 
-    pub fn password(mut self, password: Option<String>) -> Self {
-        self.password = password;
-        self
-    }
-
     pub fn max_players(mut self, max_players: Option<u32>) -> Self {
         self.max_players = max_players;
         self
@@ -67,7 +60,6 @@ impl Default for HostConfig {
     fn default() -> Self {
         Self {
             event_delay: Duration::ZERO,
-            password: None,
             max_players: None,
         }
     }
@@ -79,8 +71,6 @@ impl Default for HostConfig {
 pub struct JoinConfig {
     /// `PathChanged` 发送策略：`ZERO` 仅变化时发送，非零按间隔发送。
     pub event_delay: Duration,
-    /// 连接密码，`None` 表示不校验。
-    pub password: Option<String>,
     /// 最大重连次数：`None` 无限，`Some(0)` 关闭重连。
     pub max_retries: Option<u32>,
     /// 首次连接的重试上限，默认 3 次。
@@ -101,11 +91,6 @@ impl JoinConfig {
         self
     }
 
-    pub fn password(mut self, password: Option<String>) -> Self {
-        self.password = password;
-        self
-    }
-
     pub fn max_retries(mut self, max_retries: Option<u32>) -> Self {
         self.max_retries = max_retries;
         self
@@ -116,7 +101,6 @@ impl Default for JoinConfig {
     fn default() -> Self {
         Self {
             event_delay: Duration::ZERO,
-            password: None,
             max_retries: None,
             initial_retries: 3,
             base_backoff: Duration::from_millis(500),
@@ -152,7 +136,7 @@ pub enum TunnelEvent {
     Reconnecting { attempt: u32 },
     /// join 侧：重连成功。
     Reconnected,
-    /// host 侧：密码验证失败，连接已被关闭。
+    /// host 侧：访问令牌验证失败，连接已被关闭。
     AuthFailed { id: PeerId },
     /// host 侧：连接被主动拒绝，如服务器满员时 `reason` 为 `"server full"`。
     PlayerRejected { id: PeerId, reason: String },

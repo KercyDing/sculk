@@ -44,14 +44,12 @@ pub enum Intent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostField {
     Port,
-    Password,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinField {
-    Ticket,
+    Uri,
     Port,
-    Password,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,11 +74,9 @@ pub struct Model {
     pub relay_idx: usize,
     pub tunnel: TunnelStatus,
     pub host_port: InputField,
-    pub host_password: InputField,
     pub host_field: HostField,
-    pub join_ticket: InputField,
+    pub join_uri: InputField,
     pub join_port: InputField,
-    pub join_password: InputField,
     pub join_field: JoinField,
     pub relay_url: InputField,
 }
@@ -95,7 +91,6 @@ impl Model {
         let relay_url = profile.relay.url.clone().unwrap_or_default();
         let host_port = profile.host.port.to_string();
         let join_port = profile.join.port.to_string();
-        let join_ticket = profile.join.last_ticket.clone().unwrap_or_default();
 
         let mut model = Self {
             show_help: false,
@@ -111,12 +106,10 @@ impl Model {
             relay_idx,
             tunnel,
             host_port: InputField::with_value("端口", &host_port),
-            host_password: InputField::new("密码"),
             host_field: HostField::Port,
-            join_ticket: InputField::with_value("票据", &join_ticket),
+            join_uri: InputField::new("分享 URI"),
             join_port: InputField::with_value("端口", &join_port),
-            join_password: InputField::new("密码"),
-            join_field: JoinField::Ticket,
+            join_field: JoinField::Uri,
             relay_url: InputField::with_value("URL", &relay_url),
         };
         model.relay_state.select(Some(relay_idx));
@@ -281,22 +274,19 @@ impl Model {
         {
             match self.tunnel.state.mode {
                 Some(TunnelMode::Host) => {
-                    self.host_password.clear();
                     self.add_log("host 隧道已启动");
                 }
                 Some(TunnelMode::Join) => {
-                    self.join_password.clear();
                     self.add_log("已成功连入隧道");
                 }
                 None => {}
             }
         }
-        if self.tunnel.state.phase == TunnelPhase::Idle && previous_phase != TunnelPhase::Idle {
-            self.host_password.clear();
-            self.join_password.clear();
-            if matches!(previous_phase, TunnelPhase::Active | TunnelPhase::Stopping) {
-                self.add_log("隧道已关闭");
-            }
+        if self.tunnel.state.phase == TunnelPhase::Idle
+            && previous_phase != TunnelPhase::Idle
+            && matches!(previous_phase, TunnelPhase::Active | TunnelPhase::Stopping)
+        {
+            self.add_log("隧道已关闭");
         }
     }
 

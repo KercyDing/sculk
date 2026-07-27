@@ -124,7 +124,8 @@ fn relay_tab_up_down_moves_relay_selection() {
 fn editing_mode_inserts_chars() {
     let mut state = test_state();
     state.input_mode = InputMode::Editing;
-    state.host_port.clear();
+    state.host_port.value.clear();
+    state.host_port.cursor = 0;
     handle_key(&mut state, key(KeyCode::Char('8')));
     handle_key(&mut state, key(KeyCode::Char('0')));
     assert_eq!(state.host_port.value, "80");
@@ -197,7 +198,7 @@ fn handle_tunnel_update_closed() {
 
     assert_eq!(state.tunnel.state.phase, TunnelPhase::Idle);
     assert!(state.tunnel.state.mode.is_none());
-    assert!(state.tunnel.state.ticket.is_none());
+    assert!(state.tunnel.state.join_uri.is_none());
     assert!(state.tunnel.connections.is_empty());
 }
 

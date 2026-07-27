@@ -1,13 +1,13 @@
 //! sculk：面向 Minecraft 联机的 P2P 隧道库。
 //!
 //! 基于 [`iroh`](https://iroh.computer) 提供端到端加密的 QUIC 连接，
-//! 封装了 host/join 双端流程、票据编码、事件流与自动重连能力。
+//! 封装了 host/join 双端流程、分享 URI、事件流与自动重连能力。
 //!
 //! # Overview
 //!
 //! - [`tunnel::IrohTunnel`]：创建 host 或 join 隧道。
 //! - [`tunnel::TunnelService`]：托管单条隧道的生命周期、状态与多调用方事件订阅。
-//! - [`tunnel::Ticket`]：`sculk://` 连接票据（可序列化分享）。
+//! - [`tunnel::JoinUri`]：`sculk://join/v1/` 分享 URI。
 //! - [`tunnel::HostConfig`] / [`tunnel::JoinConfig`]：分端配置。
 //! - [`tunnel::TunnelEvent`]：运行时状态与错误事件。
 //!
@@ -16,16 +16,18 @@
 //! Host 端：
 //!
 //! ```no_run
-//! use sculk::tunnel::{IrohTunnel, HostConfig};
+//! use sculk::tunnel::{AccessToken, HostConfig, IrohTunnel, ServiceId};
 //!
-//! # async fn demo() -> sculk::Result<()> {
-//! let (_tunnel, ticket, mut events) =
-//!     IrohTunnel::host(25565, None, None, HostConfig::default()).await?;
-//! println!("share ticket: {ticket}");
-//!
-//! while let Some(event) = events.recv().await {
-//!     println!("{event:?}");
-//! }
+//! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+//! let (_tunnel, uri, _events) = IrohTunnel::host(
+//!     25565,
+//!     None,
+//!     None,
+//!     ServiceId::generate(),
+//!     AccessToken::generate(),
+//!     HostConfig::default(),
+//! ).await?;
+//! println!("share URI: {}", uri.expose_secret_uri()?);
 //! # Ok(())
 //! # }
 //! ```
@@ -33,15 +35,12 @@
 //! Join 端：
 //!
 //! ```no_run
-//! use sculk::tunnel::{IrohTunnel, Ticket, JoinConfig};
+//! use sculk::tunnel::{JoinOptions, JoinUri, TunnelService};
 //!
-//! # async fn demo() -> sculk::Result<()> {
-//! let ticket: Ticket = "sculk://<endpoint-id>".parse()?;
-//! let (_tunnel, mut events) = IrohTunnel::join(&ticket, 30000, JoinConfig::default()).await?;
-//!
-//! while let Some(event) = events.recv().await {
-//!     println!("{event:?}");
-//! }
+//! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+//! let uri: JoinUri = "sculk://join/v1/<payload>".parse()?;
+//! let service = TunnelService::new();
+//! service.start_join(JoinOptions::new(uri)).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -49,7 +48,7 @@
 //! # Notes
 //!
 //! - `HostConfig::max_players` 按唯一 `EndpointId` 计数。
-//! - 密码是应用层校验，不替代传输层加密。
+//! - 分享 URI 包含当前会话访问令牌，不应写入日志或持久化配置。
 //! - `join` 侧是否自动重连由 `JoinConfig::max_retries` 控制。
 //! - 简单集成优先使用 `TunnelService`；需要直接拥有事件接收端时使用 `IrohTunnel`。
 

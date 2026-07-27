@@ -3,6 +3,8 @@
 use std::fmt;
 use std::str::FromStr;
 
+use subtle::ConstantTimeEq;
+
 /// Relay 服务器地址，封装 [`iroh::RelayUrl`]。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RelayUrl(pub(crate) iroh::RelayUrl);
@@ -51,5 +53,68 @@ impl SecretKey {
 impl From<iroh::SecretKey> for SecretKey {
     fn from(key: iroh::SecretKey) -> Self {
         Self(key)
+    }
+}
+
+/// 服务的稳定逻辑标识。
+///
+/// 复制为新服务时应生成新值；移动或恢复原服务时应保留原值。
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ServiceId([u8; 16]);
+
+impl ServiceId {
+    /// 生成新的随机服务标识。
+    pub fn generate() -> Self {
+        Self(rand::random())
+    }
+
+    /// 从固定字节创建服务标识。
+    pub const fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
+
+    /// 返回用于二进制协议的固定字节。
+    pub const fn to_bytes(self) -> [u8; 16] {
+        self.0
+    }
+}
+
+impl fmt::Debug for ServiceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ServiceId").field(&self.0).finish()
+    }
+}
+
+/// 仅在当前 Host 会话中有效的访问令牌。
+///
+/// 此类型故意不实现 `Display`，且 `Debug` 输出会脱敏，避免令牌进入日志。
+#[derive(Clone, PartialEq, Eq)]
+pub struct AccessToken([u8; 32]);
+
+impl AccessToken {
+    /// 生成新的 256 位随机令牌。
+    pub fn generate() -> Self {
+        Self(rand::random())
+    }
+
+    /// 从固定字节创建令牌，主要用于 URI 解析与测试。
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// 返回用于二进制协议的固定字节。
+    pub const fn to_bytes(&self) -> [u8; 32] {
+        self.0
+    }
+
+    /// 以常量时间比较两个令牌。
+    pub fn matches(&self, other: &Self) -> bool {
+        self.0.ct_eq(&other.0).into()
+    }
+}
+
+impl fmt::Debug for AccessToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AccessToken(REDACTED)")
     }
 }

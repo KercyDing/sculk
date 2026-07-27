@@ -88,20 +88,13 @@ fn render_host_fields(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model,
         &model.host_port.value,
         focused && model.host_field == HostField::Port,
     );
-    render_field_line(
-        frame,
-        rows[3],
-        model.host_password.label,
-        &model.host_password.value,
-        focused && model.host_field == HostField::Password,
-    );
 
     frame.render_widget(
         Paragraph::new(Span::styled(
             "i 编辑 | ↑/↓ 切换字段",
             Style::default().fg(Color::DarkGray).bg(BG),
         )),
-        rows[5],
+        rows[3],
     );
 }
 
@@ -135,9 +128,9 @@ fn render_join_fields(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model,
     render_field_line(
         frame,
         rows[2],
-        model.join_ticket.label,
-        &model.join_ticket.value,
-        focused && model.join_field == JoinField::Ticket,
+        model.join_uri.label,
+        &model.join_uri.value,
+        focused && model.join_field == JoinField::Uri,
     );
     render_field_line(
         frame,
@@ -146,20 +139,13 @@ fn render_join_fields(frame: &mut ratatui::Frame<'_>, area: Rect, model: &Model,
         &model.join_port.value,
         focused && model.join_field == JoinField::Port,
     );
-    render_field_line(
-        frame,
-        rows[4],
-        model.join_password.label,
-        &model.join_password.value,
-        focused && model.join_field == JoinField::Password,
-    );
 
     frame.render_widget(
         Paragraph::new(Span::styled(
             "i 编辑 | ↑/↓ 切换字段",
             Style::default().fg(Color::DarkGray).bg(BG),
         )),
-        rows[6],
+        rows[5],
     );
 }
 

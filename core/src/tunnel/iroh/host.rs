@@ -6,6 +6,7 @@ use super::auth::auth_verify;
 use super::monitor::spawn_path_monitor;
 use super::session::HostSessions;
 use super::transport::bridge;
+use crate::types::{AccessToken, ServiceId};
 
 const CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECTION_TASKS_MAX: usize = 128;
@@ -15,7 +16,8 @@ pub(super) struct HostContext {
     pub(super) conns: Arc<Mutex<Vec<TrackedConnection>>>,
     pub(super) sessions: Arc<Mutex<HostSessions>>,
     pub(super) event_delay: Duration,
-    pub(super) password: Option<String>,
+    pub(super) service_id: ServiceId,
+    pub(super) token: AccessToken,
     pub(super) max_players: Option<u32>,
 }
 
@@ -94,31 +96,18 @@ async fn start_host_connection(
     let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
     tracing::info!(remote = %remote_id, "player connected");
 
-    if let Some(ref password) = ctx.password {
-        match auth_verify(&conn, password).await {
-            Ok(true) => {}
-            Ok(false) => {
-                tracing::info!(remote = %remote_id, "auth failed");
-                super::emit_event(
-                    tx,
-                    TunnelEvent::AuthFailed {
-                        id: remote_id.clone(),
-                    },
-                );
-                spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
-                return Ok(());
-            }
-            Err(e) => {
-                tracing::warn!(remote = %remote_id, "auth error: {e}");
-                super::emit_event(
-                    tx,
-                    TunnelEvent::AuthFailed {
-                        id: remote_id.clone(),
-                    },
-                );
-                spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
-                return Ok(());
-            }
+    match auth_verify(&conn, ctx.service_id, &ctx.token).await {
+        Ok(true) => {}
+        Ok(false) | Err(_) => {
+            tracing::info!(remote = %remote_id, "access token rejected");
+            super::emit_event(
+                tx,
+                TunnelEvent::AuthFailed {
+                    id: remote_id.clone(),
+                },
+            );
+            spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
+            return Ok(());
         }
     }
 
