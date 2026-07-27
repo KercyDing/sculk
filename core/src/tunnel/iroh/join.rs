@@ -29,7 +29,12 @@ pub(super) async fn reconnect_supervisor(
     loop {
         let remote_id = PeerId::new(conn.remote_id().fmt_short().to_string());
         spawn_path_monitor(conn.clone(), remote_id, tx.clone(), ctx.config.event_delay);
-        let accept_handle = spawn_join_accept_loop(conn.clone(), ctx.listener.clone(), tx.clone());
+        let accept_handle = spawn_join_accept_loop(
+            conn.clone(),
+            ctx.listener.clone(),
+            tx.clone(),
+            ctx.config.local_sessions_max.get(),
+        );
         let conn_handle = conn.weak_handle();
 
         // 等待连接关闭，或提前收到关闭信号
@@ -156,9 +161,10 @@ fn spawn_join_accept_loop(
     conn: Connection,
     listener: Arc<TcpListener>,
     tx: mpsc::Sender<TunnelEvent>,
+    local_sessions_max: usize,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        if let Err(e) = join_accept_loop(conn, listener).await {
+        if let Err(e) = join_accept_loop(conn, listener, local_sessions_max).await {
             super::emit_event(
                 &tx,
                 TunnelEvent::Error {
@@ -244,8 +250,18 @@ pub(super) async fn connect_with_retry(
 }
 
 /// Join 侧本地监听并转发到 QUIC 双向流。
-async fn join_accept_loop(conn: Connection, listener: Arc<TcpListener>) -> crate::Result<()> {
+async fn join_accept_loop(
+    conn: Connection,
+    listener: Arc<TcpListener>,
+    local_sessions_max: usize,
+) -> crate::Result<()> {
+    let slots = Arc::new(tokio::sync::Semaphore::new(local_sessions_max));
     loop {
+        let permit = slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| crate::error::TunnelError::AcceptLocalTcpClient(e.into()))?;
         let (tcp, peer) = listener
             .accept()
             .await
@@ -254,6 +270,7 @@ async fn join_accept_loop(conn: Connection, listener: Arc<TcpListener>) -> crate
 
         let conn = conn.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             let (send, recv) = match conn.open_bi().await {
                 Ok(pair) => pair,
                 Err(e) => {

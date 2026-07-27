@@ -6,7 +6,10 @@
 //! 获取 [`ConnectionSnapshot`] 用于指标展示。
 
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::time::Duration;
+
+const DEFAULT_LOCAL_SESSIONS_MAX: NonZeroUsize = NonZeroUsize::new(64).unwrap();
 
 /// 对端节点标识，由 `EndpointId::fmt_short()` 生成的短格式。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,6 +82,8 @@ pub struct JoinConfig {
     pub base_backoff: Duration,
     /// 重连最大退避。
     pub max_backoff: Duration,
+    /// 同时处理的本地 TCP 转发会话上限。
+    pub local_sessions_max: NonZeroUsize,
 }
 
 impl JoinConfig {
@@ -95,6 +100,12 @@ impl JoinConfig {
         self.max_retries = max_retries;
         self
     }
+
+    /// 设置本地 TCP 转发会话上限。
+    pub fn local_sessions_max(mut self, local_sessions_max: NonZeroUsize) -> Self {
+        self.local_sessions_max = local_sessions_max;
+        self
+    }
 }
 
 impl Default for JoinConfig {
@@ -105,6 +116,7 @@ impl Default for JoinConfig {
             initial_retries: 3,
             base_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
+            local_sessions_max: DEFAULT_LOCAL_SESSIONS_MAX,
         }
     }
 }
