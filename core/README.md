@@ -14,7 +14,7 @@ use sculk::tunnel::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service = TunnelService::new();
     let mut updates = service.subscribe();
-    let mut ticket_printed = false;
+    let mut uri_printed = false;
 
     // Expose the local Minecraft server on port 25565.
     service.start_host(HostOptions::new(25565)).await?;
@@ -33,11 +33,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match update {
                     Some(TunnelUpdate::Status(status)) => {
                         if status.state.phase == TunnelPhase::Active
-                            && !ticket_printed
-                            && let Some(ticket) = status.state.ticket
+                            && !uri_printed
+                            && let Some(uri) = status.state.join_uri
                         {
-                            println!("Connection ticket: {ticket}");
-                            ticket_printed = true;
+                            println!("Join URI: {}", uri.expose_secret_uri()?);
+                            uri_printed = true;
                         }
                         if status.state.phase == TunnelPhase::Idle {
                             break;
@@ -60,8 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-To join an existing tunnel, parse the shared `Ticket` and call
-`service.start_join(JoinOptions::new(ticket, local_port))`. See
+To join an existing tunnel, parse the shared `JoinUri` and call
+`service.start_join(JoinOptions::new(uri))`. See
 [sculk](https://github.com/KercyDing/sculk) for the complete project
 and its CLI/TUI integrations.
 
@@ -89,7 +89,7 @@ use sculk::tunnel::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service = TunnelService::new();
     let mut updates = service.subscribe();
-    let mut ticket_printed = false;
+    let mut uri_printed = false;
 
     // 将本地 25565 端口作为 Host 暴露给其他玩家。
     service.start_host(HostOptions::new(25565)).await?;
@@ -108,11 +108,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match update {
                     Some(TunnelUpdate::Status(status)) => {
                         if status.state.phase == TunnelPhase::Active
-                            && !ticket_printed
-                            && let Some(ticket) = status.state.ticket
+                            && !uri_printed
+                            && let Some(uri) = status.state.join_uri
                         {
-                            println!("连接票据: {ticket}");
-                            ticket_printed = true;
+                            println!("分享 URI: {}", uri.expose_secret_uri()?);
+                            uri_printed = true;
                         }
                         if status.state.phase == TunnelPhase::Idle {
                             break;
@@ -135,8 +135,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-加入已有隧道时，解析对方分享的 `Ticket`，然后调用
-`service.start_join(JoinOptions::new(ticket, local_port))`。完整项目与 CLI/TUI
+加入已有隧道时，解析对方分享的 `JoinUri`，然后调用
+`service.start_join(JoinOptions::new(uri))`。完整项目与 CLI/TUI
 示例见 [sculk](https://github.com/KercyDing/sculk)。
 
 ### Features
