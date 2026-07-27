@@ -614,4 +614,48 @@ mod tests {
         join.close().await;
         node.close().await;
     }
+
+    #[tokio::test]
+    async fn rejects_old_uri_after_token_rotation() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id: ServiceId::generate(),
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(service.is_ok());
+        let Ok(service) = service else {
+            node.close().await;
+            return;
+        };
+        let old_uri = service.join_uri().await;
+        assert!(old_uri.is_ok());
+        let Ok(old_uri) = old_uri else {
+            node.close().await;
+            return;
+        };
+        let rotated_uri = service.rotate_token().await;
+        assert!(rotated_uri.is_ok());
+        let Ok(rotated_uri) = rotated_uri else {
+            node.close().await;
+            return;
+        };
+
+        let old_join = IrohTunnel::join(&old_uri, 0, JoinConfig::default()).await;
+        assert!(old_join.is_err());
+        let new_join = IrohTunnel::join(&rotated_uri, 0, JoinConfig::default()).await;
+        assert!(new_join.is_ok());
+        if let Ok((join, _)) = new_join {
+            join.close().await;
+        }
+        node.close().await;
+    }
 }
