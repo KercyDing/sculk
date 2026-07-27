@@ -306,6 +306,9 @@ impl Model {
             }
             TunnelEvent::Reconnecting { attempt } => format!("正在重连 (第 {attempt} 次)..."),
             TunnelEvent::Reconnected => "重连成功".to_string(),
+            TunnelEvent::TokenRotationFailed { retry_in } => {
+                format!("令牌轮换失败，将在 {retry_in:?} 后重试")
+            }
             TunnelEvent::AuthFailed { id } => format!("认证失败: {id}"),
             TunnelEvent::PlayerRejected { id, reason } => {
                 format!("玩家被拒: {id} ({reason})")

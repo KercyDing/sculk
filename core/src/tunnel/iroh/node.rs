@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
 use tokio::sync::{RwLock, broadcast, mpsc, watch};
@@ -18,6 +19,9 @@ use crate::ErrorCategory;
 use crate::types::{AccessToken, RelayUrl, SecretKey, ServiceId};
 
 const NODE_UNAUTHENTICATED_CONNECTIONS_MAX: NonZeroUsize = NonZeroUsize::new(128).unwrap();
+const ROTATION_CLOCK_CHECK_MAX: Duration = Duration::from_secs(60);
+const ROTATION_RETRY_MIN: Duration = Duration::from_secs(1);
+const ROTATION_RETRY_MAX: Duration = Duration::from_secs(60);
 
 /// 多服务 Node 的创建参数。
 #[derive(Clone, Debug)]
@@ -69,6 +73,10 @@ pub enum SculkNodeError {
     ServiceNotFound,
     #[error("token refresh period must be greater than zero")]
     InvalidRefreshPeriod,
+    #[error("service session generation space exhausted")]
+    SessionGenerationExhausted,
+    #[error(transparent)]
+    JoinUri(#[from] crate::error::JoinUriError),
     #[error("failed to bind Node endpoint")]
     BindEndpoint(#[source] crate::error::BoxError),
 }
@@ -81,6 +89,8 @@ impl SculkNodeError {
                 ErrorCategory::InvalidConfiguration
             }
             Self::DuplicateService | Self::ServiceNotFound => ErrorCategory::OperationConflict,
+            Self::SessionGenerationExhausted => ErrorCategory::ResourceLimit,
+            Self::JoinUri(error) => error.category(),
             Self::BindEndpoint(_) => ErrorCategory::InvalidEndpoint,
         }
     }
@@ -98,6 +108,7 @@ struct NodeInner {
     services: RwLock<HashMap<ServiceId, Arc<HostedService>>>,
     unauthenticated_slots: Arc<tokio::sync::Semaphore>,
     unauthenticated_connections_max: usize,
+    service_session_next: AtomicU64,
     shutdown: watch::Sender<bool>,
 }
 
@@ -109,6 +120,8 @@ struct HostedService {
     events_tx: mpsc::Sender<TunnelEvent>,
     updates_tx: broadcast::Sender<TunnelEvent>,
     rotation_tx: watch::Sender<u64>,
+    session_generation: u64,
+    token_refresh: Option<Duration>,
     status: Arc<HostedStatus>,
 }
 
@@ -156,6 +169,10 @@ pub struct HostedServiceStatus {
     pub phase: HostedServicePhase,
     /// Generation of the currently published Join URI.
     pub uri_generation: u64,
+    /// Wall-clock time when the current Token was created.
+    pub token_created_at: SystemTime,
+    /// Wall-clock deadline for the next automatic rotation.
+    pub next_rotation_at: Option<SystemTime>,
     /// 当前已认证且仍存活的连接数量。
     pub connection_count: usize,
     /// Currently active TCP-to-QUIC bridges.
@@ -188,11 +205,17 @@ pub(super) struct HostedStatus {
 }
 
 impl HostedStatus {
-    fn new(service_id: ServiceId) -> Arc<Self> {
+    fn new(
+        service_id: ServiceId,
+        token_created_at: SystemTime,
+        next_rotation_at: Option<SystemTime>,
+    ) -> Arc<Self> {
         let initial = HostedServiceStatus {
             service_id,
             phase: HostedServicePhase::Active,
             uri_generation: 1,
+            token_created_at,
+            next_rotation_at,
             connection_count: 0,
             bridge_count: 0,
             last_error: None,
@@ -236,9 +259,11 @@ impl HostedStatus {
         self.update(|status| status.last_error = Some(category));
     }
 
-    fn rotate_uri(&self) {
+    fn rotate_uri(&self, token_created_at: SystemTime, next_rotation_at: Option<SystemTime>) {
         self.update(|status| {
             status.uri_generation = status.uri_generation.saturating_add(1);
+            status.token_created_at = token_created_at;
+            status.next_rotation_at = next_rotation_at;
         });
     }
 
@@ -290,6 +315,7 @@ impl SculkNode {
                 services: RwLock::new(HashMap::new()),
                 unauthenticated_slots,
                 unauthenticated_connections_max,
+                service_session_next: AtomicU64::new(1),
                 shutdown,
             }),
         };
@@ -311,10 +337,26 @@ impl SculkNode {
         if options.token_refresh == Some(Duration::ZERO) {
             return Err(SculkNodeError::InvalidRefreshPeriod);
         }
+        let token_created_at = SystemTime::now();
+        let next_rotation_at = rotation_deadline(token_created_at, options.token_refresh)?;
+        JoinUri::new(
+            self.inner.endpoint.id(),
+            options.service_id,
+            options.token.clone(),
+            self.inner.relay_url.clone(),
+        )
+        .expose_secret_uri()?;
+        let session_generation = self
+            .inner
+            .service_session_next
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |generation| {
+                generation.checked_add(1)
+            })
+            .map_err(|_| SculkNodeError::SessionGenerationExhausted)?;
         let (events_tx, mut events_rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let (updates_tx, _) = broadcast::channel(EVENT_CHANNEL_SIZE);
         let (rotation_tx, rotation_rx) = watch::channel(0_u64);
-        let status = HostedStatus::new(options.service_id);
+        let status = HostedStatus::new(options.service_id, token_created_at, next_rotation_at);
         let updates_tx_for_task = updates_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = events_rx.recv().await {
@@ -337,6 +379,8 @@ impl SculkNode {
             events_tx,
             updates_tx,
             rotation_tx,
+            session_generation,
+            token_refresh: options.token_refresh,
             status,
         });
         let mut services = self.inner.services.write().await;
@@ -344,11 +388,15 @@ impl SculkNode {
             return Err(SculkNodeError::DuplicateService);
         }
         services.insert(options.service_id, service);
-        if let Some(period) = options.token_refresh {
+        if let Some(period) = options.token_refresh
+            && let Some(deadline) = next_rotation_at
+        {
             tokio::spawn(rotation_loop(
                 Arc::downgrade(&self.inner),
                 options.service_id,
+                session_generation,
                 period,
+                deadline,
                 rotation_rx,
             ));
         }
@@ -413,12 +461,13 @@ impl SculkNode {
         &self,
         service_id: ServiceId,
     ) -> std::result::Result<JoinUri, SculkNodeError> {
-        self.rotate_token_inner(service_id, true).await
+        self.rotate_token_inner(service_id, None, true).await
     }
 
     async fn rotate_token_inner(
         &self,
         service_id: ServiceId,
+        expected_session_generation: Option<u64>,
         reset_timer: bool,
     ) -> std::result::Result<JoinUri, SculkNodeError> {
         let service = self
@@ -429,26 +478,62 @@ impl SculkNode {
             .get(&service_id)
             .cloned()
             .ok_or(SculkNodeError::ServiceNotFound)?;
+        if expected_session_generation
+            .is_some_and(|generation| generation != service.session_generation)
+        {
+            return Err(SculkNodeError::ServiceNotFound);
+        }
         let new_token = AccessToken::generate();
+        let candidate = JoinUri::new(
+            self.inner.endpoint.id(),
+            service.service_id,
+            new_token.clone(),
+            self.inner.relay_url.clone(),
+        );
+        candidate.expose_secret_uri()?;
+        let token_created_at = SystemTime::now();
+        let next_rotation_at = rotation_deadline(token_created_at, service.token_refresh)?;
+
         *service.token.write().await = new_token.clone();
-        service.status.rotate_uri();
+        service
+            .status
+            .rotate_uri(token_created_at, next_rotation_at);
         if reset_timer {
             service
                 .rotation_tx
                 .send_modify(|generation| *generation = generation.wrapping_add(1));
         }
         super::emit_event(&service.events_tx, TunnelEvent::TokenRotated);
-        Ok(JoinUri::new(
-            self.inner.endpoint.id(),
-            service.service_id,
-            new_token,
-            self.inner.relay_url.clone(),
-        ))
+        Ok(candidate)
     }
 
     /// 返回 Node 的稳定 EndpointId。
     pub fn endpoint_id(&self) -> EndpointId {
         self.inner.endpoint.id()
+    }
+
+    async fn record_rotation_failure(
+        &self,
+        service_id: ServiceId,
+        session_generation: u64,
+        category: ErrorCategory,
+        retry_in: Duration,
+    ) {
+        let service = self
+            .inner
+            .services
+            .read()
+            .await
+            .get(&service_id)
+            .filter(|service| service.session_generation == session_generation)
+            .cloned();
+        if let Some(service) = service {
+            service.status.set_error(category);
+            super::emit_event(
+                &service.events_tx,
+                TunnelEvent::TokenRotationFailed { retry_in },
+            );
+        }
     }
 
     /// 停止所有服务并关闭 Node Endpoint。
@@ -479,25 +564,116 @@ impl SculkNode {
 async fn rotation_loop(
     inner: std::sync::Weak<NodeInner>,
     service_id: ServiceId,
+    session_generation: u64,
     period: Duration,
+    deadline: SystemTime,
     mut reset_rx: watch::Receiver<u64>,
 ) {
+    let mut schedule = RotationSchedule::new(period, deadline);
     loop {
+        let delay = schedule.delay(SystemTime::now());
         tokio::select! {
-            _ = tokio::time::sleep(period) => {
+            _ = tokio::time::sleep(delay) => {
+                if !schedule.should_rotate(SystemTime::now()) {
+                    continue;
+                }
                 let Some(inner) = inner.upgrade() else { return };
                 let node = SculkNode { inner };
-                if node.rotate_token_inner(service_id, false).await.is_err() {
-                    return;
+                match node
+                    .rotate_token_inner(service_id, Some(session_generation), false)
+                    .await
+                {
+                    Ok(_) => {
+                        if !schedule.reset(SystemTime::now()) {
+                            return;
+                        }
+                    }
+                    Err(SculkNodeError::ServiceNotFound) => return,
+                    Err(error) => {
+                        schedule.record_failure();
+                        let retry_in = schedule.retry_delay();
+                        node.record_rotation_failure(
+                            service_id,
+                            session_generation,
+                            error.category(),
+                            retry_in,
+                        )
+                        .await;
+                    }
                 }
             }
             changed = reset_rx.changed() => {
                 if changed.is_err() {
                     return;
                 }
+                if !schedule.reset(SystemTime::now()) {
+                    return;
+                }
             }
         }
     }
+}
+
+struct RotationSchedule {
+    period: Duration,
+    deadline: SystemTime,
+    failure_count: u32,
+}
+
+impl RotationSchedule {
+    fn new(period: Duration, deadline: SystemTime) -> Self {
+        Self {
+            period,
+            deadline,
+            failure_count: 0,
+        }
+    }
+
+    fn delay(&self, now: SystemTime) -> Duration {
+        if self.failure_count > 0 {
+            return self.retry_delay();
+        }
+        self.deadline
+            .duration_since(now)
+            .unwrap_or(Duration::ZERO)
+            .min(ROTATION_CLOCK_CHECK_MAX)
+    }
+
+    fn should_rotate(&self, now: SystemTime) -> bool {
+        self.failure_count > 0 || now >= self.deadline
+    }
+
+    fn reset(&mut self, now: SystemTime) -> bool {
+        let Some(deadline) = now.checked_add(self.period) else {
+            return false;
+        };
+        self.deadline = deadline;
+        self.failure_count = 0;
+        true
+    }
+
+    fn record_failure(&mut self) {
+        self.failure_count = self.failure_count.saturating_add(1);
+    }
+
+    fn retry_delay(&self) -> Duration {
+        let exponent = self.failure_count.saturating_sub(1).min(31);
+        ROTATION_RETRY_MIN
+            .saturating_mul(2_u32.saturating_pow(exponent))
+            .min(ROTATION_RETRY_MAX)
+    }
+}
+
+fn rotation_deadline(
+    now: SystemTime,
+    period: Option<Duration>,
+) -> std::result::Result<Option<SystemTime>, SculkNodeError> {
+    period
+        .map(|period| {
+            now.checked_add(period)
+                .ok_or(SculkNodeError::InvalidRefreshPeriod)
+        })
+        .transpose()
 }
 
 fn validate_target(target_addr: SocketAddr) -> std::result::Result<(), SculkNodeError> {
@@ -890,6 +1066,8 @@ mod tests {
             connected.is_some(),
             "authenticated connection status missing"
         );
+        let rotated = service.rotate_token().await;
+        assert!(rotated.is_ok(), "rotation after authentication failed");
         let local_addr = join.local_addr();
         assert!(local_addr.is_some());
         let Some(local_addr) = local_addr else {
@@ -920,6 +1098,245 @@ mod tests {
             recv_status_where(&mut status_updates, |status| status.bridge_count == 0).await;
         assert!(bridge_closed.is_some(), "closed bridge status missing");
         join.close().await;
+        node.close().await;
+    }
+
+    #[test]
+    fn rotation_schedule_handles_clock_jumps_without_catch_up() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let deadline = start + Duration::from_secs(120);
+        let mut schedule = RotationSchedule::new(Duration::from_secs(120), deadline);
+
+        assert_eq!(
+            schedule.delay(start),
+            ROTATION_CLOCK_CHECK_MAX,
+            "long waits must be split into bounded clock checks"
+        );
+        let jumped_forward = start + Duration::from_secs(500);
+        assert!(schedule.should_rotate(jumped_forward));
+        assert!(schedule.reset(jumped_forward));
+        assert!(!schedule.should_rotate(jumped_forward));
+        assert_eq!(
+            schedule.deadline,
+            jumped_forward + Duration::from_secs(120),
+            "missed periods must collapse into one rotation"
+        );
+
+        let jumped_backward = start - Duration::from_secs(500);
+        assert_eq!(
+            schedule.delay(jumped_backward),
+            ROTATION_CLOCK_CHECK_MAX,
+            "backward jumps must not create an unbounded sleep"
+        );
+    }
+
+    #[test]
+    fn rotation_retry_backoff_is_bounded() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let mut schedule = RotationSchedule::new(Duration::from_secs(60), start);
+
+        schedule.record_failure();
+        assert_eq!(schedule.retry_delay(), ROTATION_RETRY_MIN);
+        schedule.record_failure();
+        assert_eq!(schedule.retry_delay(), ROTATION_RETRY_MIN.saturating_mul(2));
+        for _ in 0..64 {
+            schedule.record_failure();
+        }
+        assert_eq!(schedule.retry_delay(), ROTATION_RETRY_MAX);
+        assert_eq!(schedule.delay(start), ROTATION_RETRY_MAX);
+        assert!(schedule.should_rotate(start));
+    }
+
+    #[test]
+    fn rejects_unrepresentable_rotation_deadline() {
+        let deadline = rotation_deadline(SystemTime::UNIX_EPOCH, Some(Duration::MAX));
+        assert!(matches!(
+            deadline,
+            Err(SculkNodeError::InvalidRefreshPeriod)
+        ));
+    }
+
+    #[tokio::test]
+    async fn manual_rotation_resets_automatic_deadline() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let period = Duration::from_millis(300);
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id: ServiceId::generate(),
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: Some(period),
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(service.is_ok());
+        let Ok(service) = service else {
+            node.close().await;
+            return;
+        };
+        let initial = service.status().await;
+        assert!(initial.is_ok());
+        let initial_created_at = initial.as_ref().ok().map(|status| status.token_created_at);
+        assert!(
+            initial
+                .as_ref()
+                .ok()
+                .and_then(|status| status.next_rotation_at)
+                .is_some()
+        );
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let manual = service.rotate_token().await;
+        assert!(manual.is_ok());
+        let after_manual = service.status().await;
+        assert!(after_manual.is_ok());
+        let Some(after_manual) = after_manual.ok() else {
+            node.close().await;
+            return;
+        };
+        assert_eq!(after_manual.uri_generation, 2);
+        assert!(Some(after_manual.token_created_at) > initial_created_at);
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(
+            service
+                .status()
+                .await
+                .ok()
+                .map(|status| status.uri_generation),
+            Some(2),
+            "the old automatic deadline was not cancelled"
+        );
+
+        let rotated = async {
+            for _ in 0..40 {
+                let status = service.status().await.ok()?;
+                if status.uri_generation == 3 {
+                    return Some(status);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            None
+        };
+        let rotated = tokio::time::timeout(Duration::from_secs(1), rotated).await;
+        assert!(matches!(rotated, Ok(Some(_))));
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn stopped_rotation_task_cannot_modify_republished_service() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service_id = ServiceId::generate();
+        let old = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: Some(Duration::from_millis(100)),
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(old.is_ok());
+        let stopped = node.stop_service(service_id).await;
+        assert!(stopped.is_ok());
+
+        let current = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25566)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(current.is_ok());
+        let Ok(current) = current else {
+            node.close().await;
+            return;
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            current
+                .status()
+                .await
+                .ok()
+                .map(|status| status.uri_generation),
+            Some(1)
+        );
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn rotation_failure_updates_status_and_warning_event() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service_id = ServiceId::generate();
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(service.is_ok());
+        let Ok(service) = service else {
+            node.close().await;
+            return;
+        };
+        let events = service.subscribe().await;
+        assert!(events.is_ok());
+        let Ok(mut events) = events else {
+            node.close().await;
+            return;
+        };
+        let session_generation = node
+            .inner
+            .services
+            .read()
+            .await
+            .get(&service_id)
+            .map(|service| service.session_generation);
+        assert!(session_generation.is_some());
+        let Some(session_generation) = session_generation else {
+            node.close().await;
+            return;
+        };
+
+        node.record_rotation_failure(
+            service_id,
+            session_generation,
+            ErrorCategory::Internal,
+            ROTATION_RETRY_MIN,
+        )
+        .await;
+        assert_eq!(
+            service
+                .status()
+                .await
+                .ok()
+                .and_then(|status| status.last_error),
+            Some(ErrorCategory::Internal)
+        );
+        let warning = tokio::time::timeout(Duration::from_secs(1), events.recv()).await;
+        assert!(matches!(
+            warning,
+            Ok(Ok(TunnelEvent::TokenRotationFailed {
+                retry_in: ROTATION_RETRY_MIN
+            }))
+        ));
         node.close().await;
     }
 

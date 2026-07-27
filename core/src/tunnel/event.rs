@@ -150,6 +150,8 @@ pub enum TunnelEvent {
     Reconnected,
     /// Host 侧：访问令牌已轮换，调用方应重新获取当前 Join URI。
     TokenRotated,
+    /// Host side: an automatic Token rotation failed and will be retried after this delay.
+    TokenRotationFailed { retry_in: Duration },
     /// host 侧：访问令牌验证失败，连接已被关闭。
     AuthFailed { id: PeerId },
     /// host 侧：连接被主动拒绝，如服务器满员时 `reason` 为 `"server full"`。

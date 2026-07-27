@@ -313,6 +313,9 @@ fn print_event(event: &TunnelEvent) {
             println!("[~] Reconnecting (attempt {attempt})...")
         }
         TunnelEvent::Reconnected => println!("[*] Reconnected to host"),
+        TunnelEvent::TokenRotationFailed { retry_in } => {
+            eprintln!("[!] Token rotation failed; retrying in {retry_in:?}")
+        }
         TunnelEvent::AuthFailed { id } => println!("[!] Auth failed: {id}"),
         TunnelEvent::PlayerRejected { id, reason } => {
             println!("[-] Player rejected: {id} ({reason})")
