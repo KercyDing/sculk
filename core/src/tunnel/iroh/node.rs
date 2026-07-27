@@ -51,12 +51,52 @@ pub struct HostedServiceOptions {
     pub service_id: ServiceId,
     /// 仅允许本机 loopback 的目标 Minecraft 地址。
     pub target_addr: SocketAddr,
-    /// 当前会话授权令牌。
-    pub token: AccessToken,
-    /// 自动轮换周期；`None` 表示直到服务停止才失效。
-    pub token_refresh: Option<Duration>,
+    /// 上次发布保存的令牌状态；首次发布时为 `None`。
+    pub token_state: Option<TokenState>,
+    /// 跨停止和重启生效的令牌刷新策略。
+    pub token_refresh: TokenRefreshPolicy,
     /// 服务级连接策略。
     pub config: HostConfig,
+}
+
+/// 跨服务停止和进程重启生效的令牌刷新策略。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TokenRefreshPolicy {
+    /// 每次发布服务时生成新令牌。
+    #[default]
+    Always,
+    /// 一直复用已保存的令牌，直到手动轮换。
+    Never,
+    /// 从令牌创建时刻开始按自然时间定期轮换。
+    After(Duration),
+}
+
+/// 需要由实例管理层安全持久化的令牌状态。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TokenState {
+    token: AccessToken,
+    created_at: SystemTime,
+}
+
+impl TokenState {
+    /// 从令牌及其原始创建时间恢复状态。
+    pub fn new(token: AccessToken, created_at: SystemTime) -> Self {
+        Self { token, created_at }
+    }
+
+    /// 返回访问令牌。
+    pub fn token(&self) -> &AccessToken {
+        &self.token
+    }
+
+    /// 返回令牌的原始创建时间。
+    pub fn created_at(&self) -> SystemTime {
+        self.created_at
+    }
+
+    fn generate(now: SystemTime) -> Self {
+        Self::new(AccessToken::generate(), now)
+    }
 }
 
 /// Node 或服务操作失败。
@@ -129,6 +169,13 @@ struct HostedService {
     session_generation: u64,
     token_refresh: Option<Duration>,
     status: Arc<HostedStatus>,
+}
+
+struct ResolvedTokenState {
+    state: TokenState,
+    refresh: Option<Duration>,
+    deadline: Option<SystemTime>,
+    deadline_monotonic: Option<Instant>,
 }
 
 /// 已发布服务的轻量操作句柄。
@@ -340,17 +387,22 @@ impl SculkNode {
         options: HostedServiceOptions,
     ) -> std::result::Result<HostedServiceHandle, SculkNodeError> {
         validate_target(options.target_addr)?;
-        if options.token_refresh == Some(Duration::ZERO) {
-            return Err(SculkNodeError::InvalidRefreshPeriod);
-        }
-        let token_created_at = SystemTime::now();
-        let next_rotation_at = rotation_deadline(token_created_at, options.token_refresh)?;
-        let next_rotation_instant =
-            monotonic_rotation_deadline(Instant::now(), options.token_refresh)?;
+        let now = SystemTime::now();
+        let now_monotonic = Instant::now();
+        let resolved = resolve_token_state(
+            options.token_refresh,
+            options.token_state,
+            now,
+            now_monotonic,
+        )?;
+        let token_state = resolved.state;
+        let token_refresh = resolved.refresh;
+        let next_rotation_at = resolved.deadline;
+        let next_rotation_instant = resolved.deadline_monotonic;
         JoinUri::new(
             self.inner.endpoint.id(),
             options.service_id,
-            options.token.clone(),
+            token_state.token.clone(),
             self.inner.relay_url.clone(),
         )
         .expose_secret_uri()?;
@@ -364,7 +416,8 @@ impl SculkNode {
         let (events_tx, mut events_rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let (updates_tx, _) = broadcast::channel(EVENT_CHANNEL_SIZE);
         let (rotation_tx, rotation_rx) = watch::channel(0_u64);
-        let status = HostedStatus::new(options.service_id, token_created_at, next_rotation_at);
+        let status =
+            HostedStatus::new(options.service_id, token_state.created_at, next_rotation_at);
         let updates_tx_for_task = updates_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = events_rx.recv().await {
@@ -373,14 +426,14 @@ impl SculkNode {
         });
         let service = Arc::new(HostedService {
             target_addr: options.target_addr,
-            token: RwLock::new(options.token.clone()),
+            token: RwLock::new(token_state.token.clone()),
             service_id: options.service_id,
             context: Arc::new(HostContext {
                 conns: Arc::new(Mutex::new(Vec::new())),
                 sessions: Arc::new(Mutex::new(HostSessions::default())),
                 event_delay: options.config.event_delay,
                 service_id: options.service_id,
-                token: options.token,
+                token: token_state.token,
                 max_players: options.config.max_players,
                 status: Some(status.clone()),
             }),
@@ -389,7 +442,7 @@ impl SculkNode {
             token_rotation: AsyncMutex::new(()),
             rotation_tx,
             session_generation,
-            token_refresh: options.token_refresh,
+            token_refresh,
             status,
         });
         let mut services = self.inner.services.write().await;
@@ -397,11 +450,9 @@ impl SculkNode {
             return Err(SculkNodeError::DuplicateService);
         }
         services.insert(options.service_id, service);
-        if let (Some(period), Some(deadline), Some(deadline_monotonic)) = (
-            options.token_refresh,
-            next_rotation_at,
-            next_rotation_instant,
-        ) {
+        if let (Some(period), Some(deadline), Some(deadline_monotonic)) =
+            (token_refresh, next_rotation_at, next_rotation_instant)
+        {
             tokio::spawn(rotation_loop(
                 Arc::downgrade(&self.inner),
                 options.service_id,
@@ -562,7 +613,6 @@ impl SculkNode {
 
     /// 停止所有服务并关闭 Node Endpoint。
     pub async fn close(&self) {
-        let _ = self.inner.shutdown.send(true);
         let services = {
             let mut services = self.inner.services.write().await;
             services
@@ -582,6 +632,7 @@ impl SculkNode {
             service.status.set_phase(HostedServicePhase::Stopped);
         }
         self.inner.endpoint.close().await;
+        let _ = self.inner.shutdown.send(true);
     }
 }
 
@@ -713,16 +764,56 @@ fn rotation_deadline(
         .transpose()
 }
 
-fn monotonic_rotation_deadline(
-    now: Instant,
-    period: Option<Duration>,
-) -> std::result::Result<Option<Instant>, SculkNodeError> {
-    period
-        .map(|period| {
-            now.checked_add(period)
-                .ok_or(SculkNodeError::InvalidRefreshPeriod)
-        })
-        .transpose()
+fn resolve_token_state(
+    policy: TokenRefreshPolicy,
+    saved: Option<TokenState>,
+    now: SystemTime,
+    now_monotonic: Instant,
+) -> std::result::Result<ResolvedTokenState, SculkNodeError> {
+    match policy {
+        TokenRefreshPolicy::Always => Ok(ResolvedTokenState {
+            state: TokenState::generate(now),
+            refresh: None,
+            deadline: None,
+            deadline_monotonic: None,
+        }),
+        TokenRefreshPolicy::Never => Ok(ResolvedTokenState {
+            state: saved.unwrap_or_else(|| TokenState::generate(now)),
+            refresh: None,
+            deadline: None,
+            deadline_monotonic: None,
+        }),
+        TokenRefreshPolicy::After(period) => {
+            if period.is_zero() {
+                return Err(SculkNodeError::InvalidRefreshPeriod);
+            }
+            let mut state = saved
+                .filter(|state| state.created_at <= now)
+                .unwrap_or_else(|| TokenState::generate(now));
+            let mut deadline = state
+                .created_at
+                .checked_add(period)
+                .ok_or(SculkNodeError::InvalidRefreshPeriod)?;
+            if deadline <= now {
+                state = TokenState::generate(now);
+                deadline = now
+                    .checked_add(period)
+                    .ok_or(SculkNodeError::InvalidRefreshPeriod)?;
+            }
+            let remaining = deadline
+                .duration_since(now)
+                .map_err(|_| SculkNodeError::InvalidRefreshPeriod)?;
+            let deadline_monotonic = now_monotonic
+                .checked_add(remaining)
+                .ok_or(SculkNodeError::InvalidRefreshPeriod)?;
+            Ok(ResolvedTokenState {
+                state,
+                refresh: Some(period),
+                deadline: Some(deadline),
+                deadline_monotonic: Some(deadline_monotonic),
+            })
+        }
+    }
 }
 
 fn validate_target(target_addr: SocketAddr) -> std::result::Result<(), SculkNodeError> {
@@ -755,6 +846,18 @@ impl HostedServiceHandle {
             self.node.inner.relay_url.clone(),
         );
         Ok(uri)
+    }
+
+    /// 返回当前令牌及其原始创建时间，供实例管理层安全持久化。
+    pub async fn token_state(&self) -> std::result::Result<TokenState, SculkNodeError> {
+        let services = self.node.inner.services.read().await;
+        let service = services
+            .get(&self.service_id)
+            .ok_or(SculkNodeError::ServiceNotFound)?;
+        let _rotation = service.token_rotation.lock().await;
+        let created_at = service.status.snapshot().token_created_at;
+        let token = service.token.read().await.clone();
+        Ok(TokenState::new(token, created_at))
     }
 
     /// 返回服务的稳定状态快照。
@@ -941,8 +1044,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: first_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -972,8 +1075,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: second_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25566)),
-                token: AccessToken::generate(),
-                token_refresh: Some(Duration::from_millis(20)),
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::After(Duration::from_millis(20)),
                 config: HostConfig::default(),
             })
             .await;
@@ -1077,8 +1180,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: ServiceId::generate(),
                 target_addr,
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1160,8 +1263,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: token.clone(),
-                token_refresh: None,
+                token_state: Some(TokenState::new(token.clone(), SystemTime::now())),
+                token_refresh: TokenRefreshPolicy::Never,
                 config: HostConfig::default(),
             })
             .await;
@@ -1219,8 +1322,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: ServiceId::generate(),
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await?;
@@ -1253,8 +1356,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: ServiceId::generate(),
                 target_addr,
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await?;
@@ -1308,8 +1411,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1429,6 +1532,179 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn token_policy_applies_across_publications() {
+        let created_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let now = created_at + Duration::from_secs(60);
+        let token = AccessToken::from_bytes([0x5a; 32]);
+        let saved = TokenState::new(token.clone(), created_at);
+
+        let always = resolve_token_state(
+            TokenRefreshPolicy::Always,
+            Some(saved.clone()),
+            now,
+            Instant::now(),
+        );
+        assert!(always.is_ok());
+        let Some(always) = always.ok() else {
+            return;
+        };
+        assert!(!always.state.token.matches(&token));
+        assert_eq!(always.state.created_at, now);
+
+        let never = resolve_token_state(
+            TokenRefreshPolicy::Never,
+            Some(saved.clone()),
+            now,
+            Instant::now(),
+        );
+        assert!(never.is_ok());
+        let Some(never) = never.ok() else {
+            return;
+        };
+        assert!(never.state.token.matches(&token));
+        assert_eq!(never.state.created_at, created_at);
+        assert!(never.deadline.is_none());
+
+        let period = Duration::from_secs(3_600);
+        let timed = resolve_token_state(
+            TokenRefreshPolicy::After(period),
+            Some(saved),
+            now,
+            Instant::now(),
+        );
+        assert!(timed.is_ok());
+        let Some(timed) = timed.ok() else {
+            return;
+        };
+        assert!(timed.state.token.matches(&token));
+        assert_eq!(timed.state.created_at, created_at);
+        assert_eq!(timed.deadline, Some(created_at + period));
+    }
+
+    #[test]
+    fn timed_policy_rotates_expired_or_future_state() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
+        let period = Duration::from_secs(3_600);
+        for created_at in [now - period, now + Duration::from_secs(1)] {
+            let token = AccessToken::from_bytes([0x5a; 32]);
+            let resolved = resolve_token_state(
+                TokenRefreshPolicy::After(period),
+                Some(TokenState::new(token.clone(), created_at)),
+                now,
+                Instant::now(),
+            );
+            assert!(resolved.is_ok());
+            let Some(resolved) = resolved.ok() else {
+                return;
+            };
+            assert!(!resolved.state.token.matches(&token));
+            assert_eq!(resolved.state.created_at, now);
+            assert_eq!(resolved.deadline, Some(now + period));
+        }
+
+        assert!(matches!(
+            resolve_token_state(
+                TokenRefreshPolicy::After(Duration::ZERO),
+                None,
+                now,
+                Instant::now()
+            ),
+            Err(SculkNodeError::InvalidRefreshPeriod)
+        ));
+    }
+
+    #[tokio::test]
+    async fn token_policy_controls_uri_across_node_restarts() {
+        let secret_key = SecretKey::from_bytes(&[0x3c; 32]);
+        let service_id = ServiceId::from_bytes([0x4b; 16]);
+        let target_addr = SocketAddr::from(([127, 0, 0, 1], 25565));
+
+        let first = SculkNode::bind(NodeOptions {
+            secret_key: Some(secret_key.clone()),
+            ..NodeOptions::default()
+        })
+        .await;
+        assert!(first.is_ok());
+        let Ok(first) = first else {
+            return;
+        };
+        let first_service = first
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Never,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(first_service.is_ok());
+        let Ok(first_service) = first_service else {
+            first.close().await;
+            return;
+        };
+        let first_uri = first_service.join_uri().await;
+        let saved = first_service.token_state().await;
+        first.close().await;
+        assert!(first_uri.is_ok());
+        assert!(saved.is_ok());
+        let (Ok(first_uri), Ok(saved)) = (first_uri, saved) else {
+            return;
+        };
+
+        let second = SculkNode::bind(NodeOptions {
+            secret_key: Some(secret_key.clone()),
+            ..NodeOptions::default()
+        })
+        .await;
+        assert!(second.is_ok());
+        let Ok(second) = second else {
+            return;
+        };
+        let never = second
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr,
+                token_state: Some(saved.clone()),
+                token_refresh: TokenRefreshPolicy::Never,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(never.is_ok());
+        let Ok(never) = never else {
+            second.close().await;
+            return;
+        };
+        assert_eq!(never.join_uri().await.ok(), Some(first_uri.clone()));
+        second.close().await;
+
+        let third = SculkNode::bind(NodeOptions {
+            secret_key: Some(secret_key),
+            ..NodeOptions::default()
+        })
+        .await;
+        assert!(third.is_ok());
+        let Ok(third) = third else {
+            return;
+        };
+        let always = third
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr,
+                token_state: Some(saved),
+                token_refresh: TokenRefreshPolicy::Always,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(always.is_ok());
+        let Ok(always) = always else {
+            third.close().await;
+            return;
+        };
+        assert_ne!(always.join_uri().await.ok(), Some(first_uri));
+        third.close().await;
+    }
+
     #[tokio::test]
     async fn manual_rotation_resets_automatic_deadline() {
         let node = SculkNode::bind(NodeOptions::default()).await;
@@ -1441,8 +1717,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: ServiceId::generate(),
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: Some(period),
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::After(period),
                 config: HostConfig::default(),
             })
             .await;
@@ -1512,8 +1788,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1566,8 +1842,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: Some(Duration::from_millis(100)),
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::After(Duration::from_millis(100)),
                 config: HostConfig::default(),
             })
             .await;
@@ -1579,8 +1855,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25566)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1613,8 +1889,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1679,8 +1955,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1689,8 +1965,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25566)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1724,8 +2000,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: ServiceId::generate(),
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::new().max_players(Some(1)),
             })
             .await;
@@ -1866,8 +2142,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: ServiceId::generate(),
                 target_addr,
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;
@@ -1932,8 +2208,8 @@ mod tests {
             .start_service(HostedServiceOptions {
                 service_id: ServiceId::generate(),
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
-                token: AccessToken::generate(),
-                token_refresh: None,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Always,
                 config: HostConfig::default(),
             })
             .await;

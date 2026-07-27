@@ -56,6 +56,15 @@ pub enum PersistError {
     /// 密钥文件长度非法。
     #[error("invalid key file length: expected {expected} bytes, got {actual} bytes")]
     InvalidKeyLength { expected: usize, actual: usize },
+    /// Host 状态文件长度非法。
+    #[error("invalid host state length: expected {expected} bytes, got {actual} bytes")]
+    InvalidHostStateLength { expected: usize, actual: usize },
+    /// Host 状态文件版本不受支持。
+    #[error("unsupported host state version: {0}")]
+    UnsupportedHostStateVersion(u8),
+    /// Host 状态中的时间戳非法。
+    #[error("invalid host state timestamp")]
+    InvalidHostStateTimestamp,
     /// profile 解析失败。
     #[cfg(feature = "persist")]
     #[error("failed to parse profile `{path}`: {source}")]
@@ -196,7 +205,10 @@ impl PersistError {
             Self::RelayUrlParse(_) => ErrorCategory::InvalidEndpoint,
             Self::SystemDataDirUnavailable
             | Self::PathIo { .. }
-            | Self::InvalidKeyLength { .. } => ErrorCategory::IdentityUnavailable,
+            | Self::InvalidKeyLength { .. }
+            | Self::InvalidHostStateLength { .. }
+            | Self::UnsupportedHostStateVersion(_)
+            | Self::InvalidHostStateTimestamp => ErrorCategory::IdentityUnavailable,
             #[cfg(feature = "persist")]
             Self::ProfileParse { .. } | Self::ProfileSerialize(_) => {
                 ErrorCategory::InvalidConfiguration

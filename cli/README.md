@@ -23,6 +23,10 @@ Options:
 - `--max-players <N>` — Maximum player count
 - `--relay <URL>` — Override relay address
 - `--new-key` — Force generate a new secret key
+- `-t, --time <POLICY>` — Save the Share URI refresh policy (`always`,
+  `never`, `1h`, `3h`, `6h`, `12h`, or `24h`)
+- `-f, --force` — Generate a new Share URI for this start without changing
+  the saved refresh policy
 
 ### Join
 
@@ -69,6 +73,9 @@ sculk host
 - `--max-players <N>` — 最大玩家数
 - `--relay <URL>` — 覆盖 relay 地址
 - `--new-key` — 强制生成新密钥
+- `-t, --time <POLICY>` — 保存分享链接刷新策略（`always`、`never`、
+  `1h`、`3h`、`6h`、`12h` 或 `24h`）
+- `-f, --force` — 仅本次启动生成新分享链接，不修改已保存的刷新策略
 
 #### 加入
 

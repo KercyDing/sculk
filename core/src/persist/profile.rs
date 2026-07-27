@@ -34,6 +34,31 @@ pub struct HostProfile {
     /// 本地 Minecraft 服务端监听端口，默认 [`DEFAULT_MC_PORT`](crate::DEFAULT_MC_PORT)。
     #[serde(default = "default_mc_port")]
     pub port: u16,
+    /// 跨发布生效的分享链接刷新策略。
+    #[serde(default)]
+    pub token_refresh: TokenRefreshSetting,
+}
+
+/// 可持久化的分享链接刷新策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TokenRefreshSetting {
+    /// 每次发布都生成新链接。
+    #[default]
+    #[serde(rename = "always")]
+    Always,
+    /// 除非手动刷新，否则始终复用链接。
+    #[serde(rename = "never")]
+    Never,
+    #[serde(rename = "1h")]
+    OneHour,
+    #[serde(rename = "3h")]
+    ThreeHours,
+    #[serde(rename = "6h")]
+    SixHours,
+    #[serde(rename = "12h")]
+    TwelveHours,
+    #[serde(rename = "24h")]
+    TwentyFourHours,
 }
 
 /// join 端偏好配置，对应 `[join]` TOML 节。
@@ -59,6 +84,7 @@ impl Default for HostProfile {
     fn default() -> Self {
         Self {
             port: default_mc_port(),
+            token_refresh: TokenRefreshSetting::Always,
         }
     }
 }
@@ -277,6 +303,7 @@ mod tests {
     fn default_values() {
         let p = Profile::default();
         assert_eq!(p.host.port, crate::DEFAULT_MC_PORT);
+        assert_eq!(p.host.token_refresh, TokenRefreshSetting::Always);
         assert_eq!(p.join.port, crate::DEFAULT_INLET_PORT);
         assert!(!p.relay.custom);
         assert!(p.relay.url.is_none());
@@ -286,6 +313,7 @@ mod tests {
     fn toml_roundtrip() {
         let mut p = Profile::default();
         p.host.port = 12345;
+        p.host.token_refresh = TokenRefreshSetting::ThreeHours;
         p.relay.custom = true;
         p.relay.url = Some("https://relay.example.com".to_string());
 
@@ -297,6 +325,7 @@ mod tests {
         let p2 = if let Ok(v) = p2_res { v } else { return };
 
         assert_eq!(p2.host.port, 12345);
+        assert_eq!(p2.host.token_refresh, TokenRefreshSetting::ThreeHours);
         assert!(p2.relay.custom);
         assert_eq!(p2.relay.url.as_deref(), Some("https://relay.example.com"));
     }
@@ -308,6 +337,7 @@ mod tests {
         assert!(p_res.is_ok(), "deserialize partial profile failed");
         let p = if let Ok(v) = p_res { v } else { return };
         assert_eq!(p.host.port, 9999);
+        assert_eq!(p.host.token_refresh, TokenRefreshSetting::Always);
         assert_eq!(p.join.port, crate::DEFAULT_INLET_PORT);
         assert!(p.relay.url.is_none());
     }

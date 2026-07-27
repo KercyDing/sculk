@@ -5,14 +5,16 @@
 //! - `sculk join "<uri>"`: join a room through its share URI
 //! - `sculk relay`: manage custom relay configuration
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
-use sculk::persist::{self, Profile};
+use clap::{Parser, Subcommand, ValueEnum};
+use sculk::persist::{self, HostState, Profile, TokenRefreshSetting};
 use sculk::tunnel::{
-    HostConfig, HostOptions, JoinConfig, JoinOptions, JoinUri, LocalPort, TunnelEvent, TunnelMode,
-    TunnelPhase, TunnelService, TunnelStatus, TunnelSubscription, TunnelUpdate,
+    HostConfig, HostedServiceHandle, HostedServiceOptions, JoinConfig, JoinOptions, JoinUri,
+    LocalPort, NodeOptions, SculkNode, SecretKey, ServiceId, TokenRefreshPolicy, TunnelEvent,
+    TunnelMode, TunnelPhase, TunnelService, TunnelStatus, TunnelSubscription, TunnelUpdate,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -41,6 +43,64 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum TokenRefresh {
+    #[value(name = "always")]
+    Always,
+    #[value(name = "never")]
+    Never,
+    #[value(name = "1h")]
+    OneHour,
+    #[value(name = "3h")]
+    ThreeHours,
+    #[value(name = "6h")]
+    SixHours,
+    #[value(name = "12h")]
+    TwelveHours,
+    #[value(name = "24h")]
+    TwentyFourHours,
+}
+
+impl TokenRefresh {
+    fn policy(self) -> TokenRefreshPolicy {
+        match self {
+            Self::Always => TokenRefreshPolicy::Always,
+            Self::Never => TokenRefreshPolicy::Never,
+            Self::OneHour => TokenRefreshPolicy::After(Duration::from_secs(60 * 60)),
+            Self::ThreeHours => TokenRefreshPolicy::After(Duration::from_secs(3 * 60 * 60)),
+            Self::SixHours => TokenRefreshPolicy::After(Duration::from_secs(6 * 60 * 60)),
+            Self::TwelveHours => TokenRefreshPolicy::After(Duration::from_secs(12 * 60 * 60)),
+            Self::TwentyFourHours => TokenRefreshPolicy::After(Duration::from_secs(24 * 60 * 60)),
+        }
+    }
+
+    fn setting(self) -> TokenRefreshSetting {
+        match self {
+            Self::Always => TokenRefreshSetting::Always,
+            Self::Never => TokenRefreshSetting::Never,
+            Self::OneHour => TokenRefreshSetting::OneHour,
+            Self::ThreeHours => TokenRefreshSetting::ThreeHours,
+            Self::SixHours => TokenRefreshSetting::SixHours,
+            Self::TwelveHours => TokenRefreshSetting::TwelveHours,
+            Self::TwentyFourHours => TokenRefreshSetting::TwentyFourHours,
+        }
+    }
+}
+
+impl From<TokenRefreshSetting> for TokenRefresh {
+    fn from(setting: TokenRefreshSetting) -> Self {
+        match setting {
+            TokenRefreshSetting::Always => Self::Always,
+            TokenRefreshSetting::Never => Self::Never,
+            TokenRefreshSetting::OneHour => Self::OneHour,
+            TokenRefreshSetting::ThreeHours => Self::ThreeHours,
+            TokenRefreshSetting::SixHours => Self::SixHours,
+            TokenRefreshSetting::TwelveHours => Self::TwelveHours,
+            TokenRefreshSetting::TwentyFourHours => Self::TwentyFourHours,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Host a room and expose a local Minecraft server
@@ -63,6 +123,12 @@ enum Commands {
         /// Maximum number of connected players
         #[arg(long)]
         max_players: Option<u32>,
+        /// Share URI refresh policy; defaults to the saved policy (always)
+        #[arg(short = 't', long = "time", value_enum, value_name = "TIME")]
+        token_refresh: Option<TokenRefresh>,
+        /// Generate a new Share URI for this host start
+        #[arg(short = 'f', long = "force")]
+        force_fresh: bool,
     },
     /// Join a room with a share URI
     Join {
@@ -105,9 +171,6 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_command(cli: Cli) -> anyhow::Result<()> {
-    let service = TunnelService::new();
-    let mut updates = service.subscribe();
-
     match cli.command {
         Commands::Host {
             port,
@@ -116,6 +179,8 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             relay,
             delay,
             max_players,
+            token_refresh,
+            force_fresh,
         } => {
             let path = match key_path {
                 Some(path) => path,
@@ -128,47 +193,29 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             };
             tracing::info!(key_path = %path.display(), "using secret key");
 
-            let profile = Profile::load()?;
+            let mut profile = Profile::load()?;
             let relay_url = profile.resolve_relay_url(relay.as_deref())?;
+            let token_refresh = match token_refresh {
+                Some(token_refresh) => {
+                    profile.host.token_refresh = token_refresh.setting();
+                    profile.save()?;
+                    token_refresh
+                }
+                None => profile.host.token_refresh.into(),
+            };
             let config = HostConfig::new()
                 .event_delay(Duration::from_secs(delay))
                 .max_players(max_players);
 
-            service
-                .start_host(
-                    HostOptions::new(port)
-                        .secret_key(Some(secret_key))
-                        .relay_url(relay_url)
-                        .config(config),
-                )
-                .await?;
-            let status = wait_until_active(&mut updates, TunnelMode::Host).await?;
-            let join_uri = status
-                .state
-                .join_uri
-                .ok_or_else(|| anyhow::anyhow!("host started without a Join URI"))?;
-            let uri = join_uri.expose_secret_uri()?;
-            let quoted = format!("\"{uri}\"");
-            let uri_style = *CLAP_STYLES.get_literal();
-            println!(
-                "Join URI: {}{quoted}{}",
-                uri_style.render(),
-                uri_style.render_reset()
-            );
-
-            if clipboard::copy(&quoted) {
-                println!("(Copied to clipboard)");
-            }
-
-            let hint_style = *CLAP_STYLES.get_valid();
-            println!(
-                "{}Share this URI with players.{}",
-                hint_style.render(),
-                hint_style.render_reset()
-            );
-            println!("Press Ctrl+C to stop.");
-
-            wait_for_shutdown(&service, updates).await?;
+            run_host(
+                port,
+                secret_key,
+                relay_url,
+                config,
+                token_refresh,
+                force_fresh,
+            )
+            .await?;
         }
         Commands::Join {
             join_uri,
@@ -176,6 +223,8 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             delay,
             max_retries,
         } => {
+            let service = TunnelService::new();
+            let mut updates = service.subscribe();
             let join_uri: JoinUri = join_uri.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
             if let Some(url) = join_uri.relay_url() {
                 println!("Relay: {url}");
@@ -228,6 +277,146 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn run_host(
+    port: u16,
+    secret_key: SecretKey,
+    relay_url: Option<sculk::tunnel::RelayUrl>,
+    config: HostConfig,
+    token_refresh: TokenRefresh,
+    force_fresh: bool,
+) -> anyhow::Result<()> {
+    let state_path = persist::default_host_state_path()?;
+    let saved_state = persist::load_host_state(&state_path)?;
+    let node = SculkNode::bind(NodeOptions {
+        secret_key: Some(secret_key),
+        relay_url,
+        ..NodeOptions::default()
+    })
+    .await?;
+    let result = run_host_until_shutdown(
+        &node,
+        port,
+        config,
+        token_refresh,
+        force_fresh,
+        saved_state,
+        &state_path,
+    )
+    .await;
+    node.close().await;
+    result?;
+
+    let closed_style = *CLAP_STYLES.get_error();
+    println!(
+        "\n{}Closed.{}",
+        closed_style.render(),
+        closed_style.render_reset()
+    );
+    Ok(())
+}
+
+async fn run_host_until_shutdown(
+    node: &SculkNode,
+    port: u16,
+    config: HostConfig,
+    token_refresh: TokenRefresh,
+    force_fresh: bool,
+    saved_state: Option<HostState>,
+    state_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    let service_id = saved_state
+        .as_ref()
+        .map_or_else(ServiceId::generate, |state| state.service_id);
+    let token_state = if force_fresh {
+        None
+    } else {
+        saved_state.map(|state| state.token_state)
+    };
+    let host = node
+        .start_service(HostedServiceOptions {
+            service_id,
+            target_addr: SocketAddr::from(([127, 0, 0, 1], port)),
+            token_state,
+            token_refresh: token_refresh.policy(),
+            config,
+        })
+        .await?;
+    let mut events = host.subscribe().await?;
+    let mut statuses = host.subscribe_status().await?;
+    let mut uri_generation = host.status().await?.uri_generation;
+    save_host_state(state_path, &host).await?;
+    print_join_uri(&host.join_uri().await?, false)?;
+    println!("Press Ctrl+C to stop.");
+
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+    loop {
+        tokio::select! {
+            result = &mut ctrl_c => {
+                result?;
+                break;
+            }
+            event = events.recv() => {
+                match event {
+                    Ok(TunnelEvent::TokenRotated) => {}
+                    Ok(event) => print_event(&event),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        eprintln!("[!] Missed {count} tunnel events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            status = statuses.recv() => {
+                let Some(status) = status else {
+                    break;
+                };
+                if status.uri_generation > uri_generation {
+                    uri_generation = status.uri_generation;
+                    save_host_state(state_path, &host).await?;
+                    print_join_uri(&host.join_uri().await?, true)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn save_host_state(path: &std::path::Path, host: &HostedServiceHandle) -> anyhow::Result<()> {
+    let state = HostState {
+        service_id: host.service_id(),
+        token_state: host.token_state().await?,
+    };
+    persist::save_host_state(path, &state)?;
+    Ok(())
+}
+
+fn print_join_uri(join_uri: &JoinUri, rotated: bool) -> anyhow::Result<()> {
+    let uri = join_uri.expose_secret_uri()?;
+    let quoted = format!("\"{uri}\"");
+    let uri_style = *CLAP_STYLES.get_literal();
+    let label = if rotated {
+        "Updated Join URI"
+    } else {
+        "Join URI"
+    };
+    println!(
+        "{label}: {}{quoted}{}",
+        uri_style.render(),
+        uri_style.render_reset()
+    );
+
+    if clipboard::copy(&quoted) {
+        println!("(Copied to clipboard)");
+    }
+    let hint_style = *CLAP_STYLES.get_valid();
+    println!(
+        "{}Share this URI with players.{}",
+        hint_style.render(),
+        hint_style.render_reset()
+    );
     Ok(())
 }
 
@@ -344,5 +533,52 @@ mod tests {
         assert!(cli_res.is_ok(), "parse join");
         let cli = if let Ok(v) = cli_res { v } else { return };
         assert!(matches!(cli.command, Commands::Join { port: None, .. }));
+    }
+
+    #[test]
+    fn parse_host_token_refresh_presets() {
+        for flag in ["-t", "--time"] {
+            for value in ["always", "never", "1h", "3h", "6h", "12h", "24h"] {
+                let cli = Cli::try_parse_from(["sculk", "host", flag, value]);
+                assert!(cli.is_ok(), "parse {flag} {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn reject_unsupported_token_refresh() {
+        let cli = Cli::try_parse_from(["sculk", "host", "--time", "2h"]);
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn host_token_refresh_uses_saved_default() {
+        let cli = Cli::try_parse_from(["sculk", "host"]);
+        assert!(matches!(
+            cli,
+            Ok(Cli {
+                command: Commands::Host {
+                    token_refresh: None,
+                    force_fresh: false,
+                    ..
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_host_force_fresh() {
+        for flag in ["-f", "--force"] {
+            let cli = Cli::try_parse_from(["sculk", "host", flag]);
+            assert!(matches!(
+                cli,
+                Ok(Cli {
+                    command: Commands::Host {
+                        force_fresh: true,
+                        ..
+                    }
+                })
+            ));
+        }
     }
 }

@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 To join an existing tunnel, parse the shared `JoinUri` and call
 `service.start_join(JoinOptions::new(uri))`. See
 [sculk](https://github.com/KercyDing/sculk) for the complete project
-and its CLI/TUI integrations.
+and its CLI integration.
 
 ## Features
 
@@ -135,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 加入已有隧道时，解析对方分享的 `JoinUri`，然后调用
-`service.start_join(JoinOptions::new(uri))`。完整项目与 CLI/TUI
+`service.start_join(JoinOptions::new(uri))`。完整项目与 CLI
 示例见 [sculk](https://github.com/KercyDing/sculk)。
 
 ### Features

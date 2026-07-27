@@ -14,7 +14,7 @@ pub use event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent}
 pub use iroh::{
     HostedServiceHandle, HostedServiceOptions, HostedServicePhase, HostedServiceStatus,
     HostedServiceStatusSubscription, IrohTunnel, NodeOptions, SculkNode, SculkNodeError,
-    SculkNodeStatus,
+    SculkNodeStatus, TokenRefreshPolicy, TokenState,
 };
 pub use join_uri::JoinUri;
 pub use service::{

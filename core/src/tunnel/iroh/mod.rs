@@ -37,6 +37,7 @@ use session::HostSessions;
 pub use node::{
     HostedServiceHandle, HostedServiceOptions, HostedServicePhase, HostedServiceStatus,
     HostedServiceStatusSubscription, NodeOptions, SculkNode, SculkNodeError, SculkNodeStatus,
+    TokenRefreshPolicy, TokenState,
 };
 
 const ALPN: &[u8] = b"/sculk/node/1";

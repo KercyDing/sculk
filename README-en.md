@@ -41,7 +41,7 @@ See [installation and uninstallation](docs/install.md) for details.
 sculk host
 
 # Join a game
-sculk join "sculk://..."
+sculk join "sculk://join/v1/<payload>"
 ```
 
 See the [usage guide](docs/usage.md) for details.
@@ -79,4 +79,4 @@ only install     # Build and install the sculk CLI
 
 Copyright (C) 2026 KercyDing
 
-The entire project is dual-licensed under your choice of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+The project is dual-licensed under your choice of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

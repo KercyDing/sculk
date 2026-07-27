@@ -42,7 +42,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scrip
 sculk host
 
 # 加入
-sculk join "sculk://..."
+sculk join "sculk://join/v1/<payload>"
 ```
 
 详见文档：
@@ -81,4 +81,4 @@ only install     # 构建并安装 sculk CLI
 
 Copyright (C) 2026 KercyDing
 
-整个项目采用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 双重许可，使用者可任选其一。
+项目采用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 双重许可，使用者可任选其一。
