@@ -92,13 +92,10 @@ async fn start_host_connection(
     tx: &mpsc::Sender<TunnelEvent>,
     ctx: &HostContext,
 ) -> crate::Result<()> {
-    let remote_endpoint_id = conn.remote_id();
-    let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
-    tracing::info!(remote = %remote_id, "player connected");
-
     match auth_verify(&conn, ctx.service_id, &ctx.token).await {
-        Ok(true) => {}
+        Ok(true) => start_authenticated_host_connection(conn, mc_port, tx, ctx).await,
         Ok(false) | Err(_) => {
+            let remote_id = PeerId::new(conn.remote_id().fmt_short().to_string());
             tracing::info!(remote = %remote_id, "access token rejected");
             super::emit_event(
                 tx,
@@ -107,9 +104,21 @@ async fn start_host_connection(
                 },
             );
             spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
-            return Ok(());
+            Ok(())
         }
     }
+}
+
+/// 在 Node 已完成服务路由与认证后，继续处理该服务的连接。
+pub(super) async fn start_authenticated_host_connection(
+    conn: Connection,
+    mc_port: u16,
+    tx: &mpsc::Sender<TunnelEvent>,
+    ctx: &HostContext,
+) -> crate::Result<()> {
+    let remote_endpoint_id = conn.remote_id();
+    let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
+    tracing::info!(remote = %remote_id, "player connected");
 
     let Some((generation, is_reconnect, old_conn)) = register_session_with_grace(
         ctx.sessions.clone(),

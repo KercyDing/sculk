@@ -24,6 +24,7 @@ mod endpoint;
 mod host;
 mod join;
 mod monitor;
+mod node;
 mod session;
 mod transport;
 
@@ -31,6 +32,8 @@ use endpoint::build_endpoint;
 use host::{HostContext, host_accept_loop};
 use join::{JoinContext, connect_with_retry, reconnect_supervisor};
 use session::HostSessions;
+
+pub use node::{HostedServiceHandle, HostedServiceOptions, NodeOptions, SculkNode, SculkNodeError};
 
 const ALPN: &[u8] = b"/sculk/node/1";
 const EVENT_CHANNEL_SIZE: usize = 64;

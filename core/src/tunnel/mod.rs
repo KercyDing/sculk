@@ -11,7 +11,9 @@ mod service;
 pub use crate::types::{AccessToken, RelayUrl, SecretKey, ServiceId};
 pub use ::iroh::EndpointId;
 pub use event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent};
-pub use iroh::IrohTunnel;
+pub use iroh::{
+    HostedServiceHandle, HostedServiceOptions, IrohTunnel, NodeOptions, SculkNode, SculkNodeError,
+};
 pub use join_uri::JoinUri;
 pub use service::{
     HostOptions, JoinOptions, LocalPort, TunnelMode, TunnelPhase, TunnelService,

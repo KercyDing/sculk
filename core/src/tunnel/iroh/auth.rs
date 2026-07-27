@@ -8,6 +8,11 @@ const CONTROL_REQUEST_LEN: usize = 1 + 16 + 32;
 const CONTROL_OK: u8 = 0x00;
 const CONTROL_REJECTED: u8 = 0x01;
 
+pub(super) struct ControlRequest {
+    pub(super) service_id: ServiceId,
+    pub(super) token: AccessToken,
+}
+
 /// Join 侧打开连接的第一个双向流并完成服务选择与认证。
 pub(super) async fn auth_send(
     conn: &Connection,
@@ -67,7 +72,15 @@ async fn auth_verify_inner(
     expected_service_id: ServiceId,
     expected_token: &AccessToken,
 ) -> crate::Result<bool> {
-    let (mut send, mut recv) = conn
+    let (mut send, request) = auth_accept(conn).await?;
+    let valid = request.service_id == expected_service_id && request.token.matches(expected_token);
+    auth_respond(&mut send, valid).await?;
+    Ok(valid)
+}
+
+/// 接收控制流并解析固定长度请求；调用方必须始终回写一个统一的决定。
+pub(super) async fn auth_accept(conn: &Connection) -> crate::Result<(SendStream, ControlRequest)> {
+    let (send, mut recv) = conn
         .accept_bi()
         .await
         .map_err(|e| crate::error::TunnelError::AcceptAuthStream(e.into()))?;
@@ -75,20 +88,28 @@ async fn auth_verify_inner(
         .read_to_end(CONTROL_REQUEST_LEN)
         .await
         .map_err(|e| crate::error::TunnelError::ReadAuthPayload(e.into()))?;
-    let valid = data.len() == CONTROL_REQUEST_LEN
-        && data[0] == CONTROL_VERSION
-        && data[1..17] == expected_service_id.to_bytes()
-        && AccessToken::from_bytes(
-            data.get(17..)
-                .ok_or(crate::error::TunnelError::AuthRejectedByHost)?
-                .try_into()
-                .map_err(|_| crate::error::TunnelError::AuthRejectedByHost)?,
-        )
-        .matches(expected_token);
+    if data.len() != CONTROL_REQUEST_LEN || data[0] != CONTROL_VERSION {
+        return Err(crate::error::TunnelError::AuthRejectedByHost.into());
+    }
+    let service_id = ServiceId::from_bytes(
+        data[1..17]
+            .try_into()
+            .map_err(|_| crate::error::TunnelError::AuthRejectedByHost)?,
+    );
+    let token = AccessToken::from_bytes(
+        data[17..]
+            .try_into()
+            .map_err(|_| crate::error::TunnelError::AuthRejectedByHost)?,
+    );
+    Ok((send, ControlRequest { service_id, token }))
+}
+
+/// 对控制流请求写入成功或统一拒绝响应。
+pub(super) async fn auth_respond(send: &mut SendStream, valid: bool) -> crate::Result<()> {
     send.write_all(&[if valid { CONTROL_OK } else { CONTROL_REJECTED }])
         .await
         .map_err(|e| crate::error::TunnelError::WriteAuthDecision(e.into()))?;
     send.finish()
         .map_err(|e| crate::error::TunnelError::FinishAuthStream(e.into()))?;
-    Ok(valid)
+    Ok(())
 }
