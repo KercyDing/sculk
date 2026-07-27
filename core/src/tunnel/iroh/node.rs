@@ -482,8 +482,11 @@ impl SculkNode {
         expected_session_generation: Option<u64>,
         reset_timer: bool,
     ) -> std::result::Result<JoinUri, SculkNodeError> {
-        let services = self.inner.services.read().await;
-        let service = services
+        let service = self
+            .inner
+            .services
+            .read()
+            .await
             .get(&service_id)
             .cloned()
             .ok_or(SculkNodeError::ServiceNotFound)?;
@@ -507,6 +510,13 @@ impl SculkNode {
         let token_created_at = SystemTime::now();
         let next_rotation_at = rotation_deadline(token_created_at, service.token_refresh)?;
 
+        let services = self.inner.services.read().await;
+        let current = services
+            .get(&service_id)
+            .ok_or(SculkNodeError::ServiceNotFound)?;
+        if !Arc::ptr_eq(current, &service) {
+            return Err(SculkNodeError::ServiceNotFound);
+        }
         *service.token.write().await = new_token.clone();
         service
             .status
@@ -753,9 +763,7 @@ impl HostedServiceHandle {
         let service = services
             .get(&self.service_id)
             .ok_or(SculkNodeError::ServiceNotFound)?;
-        let _rotation = service.token_rotation.lock().await;
-        let status = service.status.snapshot();
-        Ok(status)
+        Ok(service.status.snapshot())
     }
 
     /// 独立停止此服务。
