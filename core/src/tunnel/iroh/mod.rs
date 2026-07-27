@@ -33,7 +33,10 @@ use host::{HostContext, host_accept_loop};
 use join::{JoinContext, connect_with_retry, reconnect_supervisor};
 use session::HostSessions;
 
-pub use node::{HostedServiceHandle, HostedServiceOptions, NodeOptions, SculkNode, SculkNodeError};
+pub use node::{
+    HostedServiceHandle, HostedServiceOptions, HostedServiceStatus, NodeOptions, SculkNode,
+    SculkNodeError, SculkNodeStatus,
+};
 
 const ALPN: &[u8] = b"/sculk/node/1";
 const EVENT_CHANNEL_SIZE: usize = 64;

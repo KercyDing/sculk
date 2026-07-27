@@ -102,6 +102,22 @@ pub struct HostedServiceHandle {
     service_id: ServiceId,
 }
 
+/// Node 的稳定状态快照。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SculkNodeStatus {
+    /// 当前已发布服务数。
+    pub service_count: usize,
+}
+
+/// 单个已发布服务的稳定状态快照。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostedServiceStatus {
+    /// 服务标识。
+    pub service_id: ServiceId,
+    /// 当前已认证且仍存活的连接数量。
+    pub connection_count: usize,
+}
+
 impl SculkNode {
     /// 创建 Node 并立即开始接受新连接。
     pub async fn bind(options: NodeOptions) -> std::result::Result<Self, SculkNodeError> {
@@ -214,6 +230,13 @@ impl SculkNode {
         self.inner.services.read().await.len()
     }
 
+    /// 返回 Node 的稳定状态快照。
+    pub async fn status(&self) -> SculkNodeStatus {
+        SculkNodeStatus {
+            service_count: self.service_count().await,
+        }
+    }
+
     /// 为指定服务生成新 Token，并返回对应的新 Join URI。
     ///
     /// 已认证的 QUIC 连接不受影响；后续新连接必须使用返回 URI 中的新 Token。
@@ -323,6 +346,29 @@ impl HostedServiceHandle {
             service.token.read().await.clone(),
             self.node.inner.relay_url.clone(),
         ))
+    }
+
+    /// 返回服务的稳定状态快照。
+    pub async fn status(&self) -> std::result::Result<HostedServiceStatus, SculkNodeError> {
+        let service = self
+            .node
+            .inner
+            .services
+            .read()
+            .await
+            .get(&self.service_id)
+            .cloned()
+            .ok_or(SculkNodeError::ServiceNotFound)?;
+        let connections = service
+            .context
+            .conns
+            .lock()
+            .map_err(|_| SculkNodeError::ServiceNotFound)?;
+        let connection_count = connections.iter().filter(|conn| conn.is_alive()).count();
+        Ok(HostedServiceStatus {
+            service_id: service.service_id,
+            connection_count,
+        })
     }
 
     /// 独立停止此服务。
@@ -457,6 +503,13 @@ mod tests {
         let Ok(second) = second else {
             return;
         };
+        assert_eq!(node.status().await.service_count, 2);
+        let second_status = second.status().await;
+        assert!(second_status.is_ok());
+        assert_eq!(
+            second_status.ok().map(|status| status.connection_count),
+            Some(0)
+        );
         let updates = second.subscribe().await;
         assert!(updates.is_ok());
         let Ok(mut updates) = updates else {
