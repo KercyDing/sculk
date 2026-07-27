@@ -1,5 +1,5 @@
 # Maintainer: KercyDing <dkx215417@gmail.com>
-pkgname=sculk-cli-git
+pkgname=sculk-git
 pkgver=0.4.0
 pkgrel=1
 pkgdesc="Minecraft P2P multiplayer tunnel CLI (git version)"
@@ -7,8 +7,9 @@ arch=('x86_64')
 url="https://github.com/KercyDing/sculk"
 license=('MIT' 'Apache-2.0')
 makedepends=('cargo' 'git')
-provides=('sculk-cli' 'sckc')
-conflicts=('sculk-cli-bin')
+provides=('sculk' 'sculk-cli')
+conflicts=('sculk' 'sculk-bin' 'sculk-cli-bin' 'sculk-cli-git')
+replaces=('sculk-cli-git')
 source=("git+${url}.git")
 sha256sums=('SKIP')
 
@@ -31,5 +32,5 @@ build() {
 }
 
 package() {
-    install -Dm755 "sculk/target/release/sckc" "${pkgdir}/usr/bin/sckc"
+    install -Dm755 "sculk/target/release/sculk" "${pkgdir}/usr/bin/sculk"
 }

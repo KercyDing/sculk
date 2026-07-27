@@ -1,6 +1,6 @@
 # Internal helper for release builds
 _release_build():
-    cargo build --release --bin sckc --bin sckt
+    cargo build --release --bin sculk
 
 # Run cargo check
 check():
@@ -12,22 +12,19 @@ check():
 ci() & check & dev.test:
     echo "CI complete!"
 
-# Install the local sculk clients
+# Install the local sculk client
 install() ? @os("windows") & _release_build shell?=pwsh:
     New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA "Programs\Sculk") | Out-Null
-    Copy-Item target/release/sckc.exe -Destination (Join-Path $env:LOCALAPPDATA "Programs\Sculk\sckc.exe") -Force
-    Copy-Item target/release/sckt.exe -Destination (Join-Path $env:LOCALAPPDATA "Programs\Sculk\sckt.exe") -Force
+    Copy-Item target/release/sculk.exe -Destination (Join-Path $env:LOCALAPPDATA "Programs\Sculk\sculk.exe") -Force
     $installDir = Join-Path $env:LOCALAPPDATA "Programs\Sculk"; $userPath = [Environment]::GetEnvironmentVariable("Path", "User"); if ($userPath -split ";" -notcontains $installDir) { $newPath = if ([string]::IsNullOrEmpty($userPath)) { $installDir } else { "$userPath;$installDir" }; [Environment]::SetEnvironmentVariable("Path", $newPath, "User"); Write-Output "Added $installDir to the user PATH. Open a new terminal to use it." }
-    Write-Output "Installed sckc and sckt to $(Join-Path $env:LOCALAPPDATA 'Programs\Sculk')"
+    Write-Output "Installed sculk to $(Join-Path $env:LOCALAPPDATA 'Programs\Sculk')"
 
 install() & _release_build:
     mkdir -p "$HOME/.local/bin"
-    cp target/release/sckc "$HOME/.local/bin/.sckc-install"
-    cp target/release/sckt "$HOME/.local/bin/.sckt-install"
-    chmod +x "$HOME/.local/bin/.sckc-install" "$HOME/.local/bin/.sckt-install"
-    mv "$HOME/.local/bin/.sckc-install" "$HOME/.local/bin/sckc"
-    mv "$HOME/.local/bin/.sckt-install" "$HOME/.local/bin/sckt"
-    echo "Installed sckc and sckt to $HOME/.local/bin"
+    cp target/release/sculk "$HOME/.local/bin/.sculk-install"
+    chmod +x "$HOME/.local/bin/.sculk-install"
+    mv "$HOME/.local/bin/.sculk-install" "$HOME/.local/bin/sculk"
+    echo "Installed sculk to $HOME/.local/bin"
 
 # Development builds
 [dev]

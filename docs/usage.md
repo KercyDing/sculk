@@ -3,7 +3,7 @@
 ## 建房
 
 ```sh
-sckc host --port 25565 --max-players 8
+sculk host --port 25565 --max-players 8
 ```
 
 成功后会输出一条可分享的邀请链接：
@@ -17,13 +17,13 @@ sculk://join/v1/<payload>
 ## 加入
 
 ```sh
-sckc join "sculk://join/v1/<payload>"
+sculk join "sculk://join/v1/<payload>"
 ```
 
 默认会自动选择可用端口。只有需要固定端口时才使用：
 
 ```sh
-sckc join "sculk://join/v1/<payload>" --port 30000
+sculk join "sculk://join/v1/<payload>" --port 30000
 ```
 
 连接成功后 CLI 会显示一个本地地址；在 Minecraft 的“多人游戏”中添加该地址即可进入。
@@ -31,9 +31,9 @@ sckc join "sculk://join/v1/<payload>" --port 30000
 ## Relay
 
 ```sh
-sckc relay --list
-sckc relay --url https://your-relay.example.com
-sckc relay --reset
+sculk relay --list
+sculk relay --url https://your-relay.example.com
+sculk relay --reset
 ```
 
 通常不需要修改 Relay。若修改，当前开启的房间会短暂断开，需要重新开启并分享新链接。

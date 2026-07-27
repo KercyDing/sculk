@@ -64,32 +64,26 @@ jobs:
       - name: Rename artifacts (unix)
         if: runner.os != 'Windows'
         run: |
-          mv target/${{ matrix.target }}/release/sckc sckc-${{ matrix.suffix }}
-          mv target/${{ matrix.target }}/release/sckt sckt-${{ matrix.suffix }}
+          mv target/${{ matrix.target }}/release/sculk sculk-${{ matrix.suffix }}
 
       - name: Rename artifacts (windows)
         if: runner.os == 'Windows'
         run: |
-          mv target/${{ matrix.target }}/release/sckc.exe sckc-${{ matrix.suffix }}.exe
-          mv target/${{ matrix.target }}/release/sckt.exe sckt-${{ matrix.suffix }}.exe
+          mv target/${{ matrix.target }}/release/sculk.exe sculk-${{ matrix.suffix }}.exe
 
       - name: Upload artifacts (unix)
         if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-bins
-          path: |
-            sckc-${{ matrix.suffix }}
-            sckt-${{ matrix.suffix }}
+          path: sculk-${{ matrix.suffix }}
 
       - name: Upload artifacts (windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-bins
-          path: |
-            sckc-${{ matrix.suffix }}.exe
-            sckt-${{ matrix.suffix }}.exe
+          path: sculk-${{ matrix.suffix }}.exe
 
   release:
     needs: build
@@ -101,9 +95,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            sckc-*
-            sckt-*
+          files: sculk-*
           generate_release_notes: true
 
   aur:
@@ -112,14 +104,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - pkg: sculk-cli-bin
-            dir: packaging/arch/sculk-cli-bin
-          - pkg: sculk-tui-bin
-            dir: packaging/arch/sculk-tui-bin
-          - pkg: sculk-cli-git
-            dir: packaging/arch/sculk-cli-git
-          - pkg: sculk-tui-git
-            dir: packaging/arch/sculk-tui-git
+          - pkg: sculk-bin
+            dir: packaging/arch/sculk-bin
+          - pkg: sculk-git
+            dir: packaging/arch/sculk-git
     steps:
       - uses: actions/checkout@v4
 
@@ -133,11 +121,7 @@ jobs:
         if: contains(matrix.pkg, '-bin')
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          if [[ "${{ matrix.pkg }}" == "sculk-cli-bin" ]]; then
-            ASSET_URL="https://github.com/KercyDing/sculk/releases/download/v${VERSION}/sckc-linux-amd64"
-          else
-            ASSET_URL="https://github.com/KercyDing/sculk/releases/download/v${VERSION}/sckt-linux-amd64"
-          fi
+          ASSET_URL="https://github.com/KercyDing/sculk/releases/download/v${VERSION}/sculk-linux-amd64"
           SHA=$(curl -sL "$ASSET_URL" | sha256sum | cut -d' ' -f1)
           sed -i "s/^sha256sums=.*/sha256sums=('${SHA}')/" ${{ matrix.dir }}/PKGBUILD
 

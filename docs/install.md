@@ -1,6 +1,6 @@
 # 下载、安装与卸载
 
-## CLI（`sckc`）
+## CLI（`sculk`）
 
 ### 方式一：一键脚本（推荐）
 
@@ -16,16 +16,14 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scrip
 & $([scriptblock]::Create((irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.ps1)))
 ```
 
-脚本会交互式询问安装项，请选择 `sckc`（或“全部”）。
-
 ### 方式二：Arch Linux（AUR，`paru` 示例）
 
 ```sh
 # 稳定版（推荐）
-paru -S sculk-cli-bin
+paru -S sculk-bin
 
 # 开发版（跟随 main 分支）
-paru -S sculk-cli-git
+paru -S sculk-git
 ```
 
 ### 方式三：从 crates.io 安装
@@ -41,49 +39,6 @@ git clone https://github.com/KercyDing/sculk.git
 cd sculk
 
 cargo install --path cli
-```
-
-## TUI（`sckt`）
-
-### 方式一：一键脚本（推荐）
-
-#### macOS / Linux
-
-```sh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.sh)"
-```
-
-#### Windows PowerShell
-
-```powershell
-& $([scriptblock]::Create((irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/install/install.ps1)))
-```
-
-脚本会交互式询问安装项，请选择 `sckt`（或“全部”）。
-
-### 方式二：Arch Linux（AUR，`paru` 示例）
-
-```sh
-# 稳定版（推荐）
-paru -S sculk-tui-bin
-
-# 开发版（跟随 main 分支）
-paru -S sculk-tui-git
-```
-
-### 方式三：从 crates.io 安装
-
-```sh
-cargo install sculk-tui
-```
-
-### 方式四：从源码安装
-
-```sh
-git clone https://github.com/KercyDing/sculk.git
-cd sculk
-
-cargo install --path tui
 ```
 
 ## 卸载
@@ -102,13 +57,10 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scrip
 & $([scriptblock]::Create((irm https://raw.githubusercontent.com/KercyDing/sculk/main/scripts/uninstall/uninstall.ps1)))
 ```
 
-脚本会交互式询问卸载项，可选择 `sckc`、`sckt` 或“全部”。
-
 ### 方式二：Cargo 卸载
 
 ```sh
 cargo uninstall sculk-cli
-cargo uninstall sculk-tui
 ```
 
-注意：二进制名分别是 `sckc` / `sckt`，对应的 Cargo 包名是 `sculk-cli` / `sculk-tui`。
+注意：二进制名是 `sculk`，Cargo 包名是 `sculk-cli`。卸载脚本也会清理旧版的 `sckc` 和 `sckt` 二进制。

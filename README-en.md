@@ -13,8 +13,7 @@ The GUI client is available here → [shrieker](https://github.com/KercyDing/shr
 >
 > sculk works in a similar way: it creates unobtrusive tunnels between players and lets connections happen naturally.
 
-- `sckc`: command-line client
-- `sckt`: terminal user interface
+- `sculk`: command-line client
 - `sculk`: tunnel core library
 
 ## Quick start
@@ -39,13 +38,10 @@ See [installation and uninstallation](docs/install.md) for details.
 
 ```sh
 # Host a game
-sckc host
+sculk host
 
 # Join a game
-sckc join "sculk://..."
-
-# Start the TUI
-sckt
+sculk join "sculk://..."
 ```
 
 See the [usage guide](docs/usage.md) for details.
@@ -56,7 +52,7 @@ sculk first attempts to establish a direct P2P connection. When NAT, network pol
 
 The project uses iroh's public Relay infrastructure by default. It works out of the box, but sculk does not control or guarantee its availability, latency, or bandwidth. Connections may therefore be slow, unstable, or unavailable in some regions and complex network environments.
 
-You can deploy a dedicated Relay when you need a more reliable entry point, a server closer to your users, or direct control over bandwidth and availability. Its URL can then be configured in `sckc`, `sckt`, or an application built on sculk.
+You can deploy a dedicated Relay when you need a more reliable entry point, a server closer to your users, or direct control over bandwidth and availability. Its URL can then be configured in the `sculk` CLI or an application built on sculk.
 
 For deployment instructions and ready-to-use builds, see [iroh-relay](https://github.com/KercyDing/iroh-relay).
 
@@ -64,11 +60,10 @@ For deployment instructions and ready-to-use builds, see [iroh-relay](https://gi
 
 Development requires Rust `1.91.0` or later and [`only`](https://github.com/KercyDing/only) for project tasks. `cargo-nextest` is optional.
 
-The workspace contains three crates:
+The workspace contains two crates:
 
 - `core`: tunnel core library (`sculk`)
-- `cli`: command-line client (`sculk-cli` / `sckc`)
-- `tui`: terminal client (`sculk-tui` / `sckt`)
+- `cli`: command-line client (`sculk-cli` / `sculk`)
 
 Common commands:
 
@@ -77,7 +72,7 @@ only check       # Formatting, compilation, and Clippy checks
 only ci          # Checks and development tests
 only dev build   # Development build
 only rel build   # Release build
-only install     # Build and install sckc and sckt
+only install     # Build and install the sculk CLI
 ```
 
 ## License

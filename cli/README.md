@@ -8,14 +8,14 @@ Minecraft P2P multiplayer tunnel CLI, built on [sculk](https://crates.io/crates/
 cargo install sculk-cli
 ```
 
-> The binary is named `sckc`, the crate name is `sculk-cli`.
+> The binary is named `sculk`, while the crate is named `sculk-cli`.
 
 ## Usage
 
 ### Host
 
 ```sh
-sckc host
+sculk host
 ```
 
 Options:
@@ -27,7 +27,7 @@ Options:
 ### Join
 
 ```sh
-sckc join "sculk://join/v1/<payload>"
+sculk join "sculk://join/v1/<payload>"
 ```
 
 Options:
@@ -37,9 +37,9 @@ Options:
 ### Relay Configuration
 
 ```sh
-sckc relay --list
-sckc relay --url https://your-relay.example.com
-sckc relay --reset
+sculk relay --list
+sculk relay --url https://your-relay.example.com
+sculk relay --reset
 ```
 
 ---
@@ -54,14 +54,14 @@ Minecraft P2P 联机隧道命令行客户端，基于 [sculk](https://crates.io/
 cargo install sculk-cli
 ```
 
-> 二进制名是 `sckc`，Cargo 包名是 `sculk-cli`。
+> 二进制名是 `sculk`，Cargo 包名是 `sculk-cli`。
 
 ### 使用
 
 #### 建房
 
 ```sh
-sckc host
+sculk host
 ```
 
 常用参数：
@@ -73,7 +73,7 @@ sckc host
 #### 加入
 
 ```sh
-sckc join "sculk://join/v1/<payload>"
+sculk join "sculk://join/v1/<payload>"
 ```
 
 常用参数：
@@ -83,9 +83,9 @@ sckc join "sculk://join/v1/<payload>"
 #### 中继配置
 
 ```sh
-sckc relay --list
-sckc relay --url https://your-relay.example.com
-sckc relay --reset
+sculk relay --list
+sculk relay --url https://your-relay.example.com
+sculk relay --reset
 ```
 
 更多信息见[项目主页](https://github.com/KercyDing/sculk)。

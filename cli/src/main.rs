@@ -1,9 +1,9 @@
-//! sckc 命令行工具（CLI）。
+//! sculk command-line client.
 //!
-//! 用法：
-//! - `sckc host`：创建房间并生成分享 URI
-//! - `sckc join "<uri>"`：通过分享 URI 加入房间
-//! - `sckc relay`：管理自定义 relay 配置
+//! Commands:
+//! - `sculk host`: host a room and generate a share URI
+//! - `sculk join "<uri>"`: join a room through its share URI
+//! - `sculk relay`: manage custom relay configuration
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -29,7 +29,7 @@ const CLAP_STYLES: clap::builder::styling::Styles = clap::builder::styling::Styl
 
 #[derive(Parser)]
 #[command(
-    name = "sckc",
+    name = "sculk",
     version,
     about = "P2P tunnel for Minecraft multiplayer",
     arg_required_else_help = true,
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn parse_host_command_from_args() {
-        let cli_res = Cli::try_parse_from(["sckc", "host", "-p", "25565"]);
+        let cli_res = Cli::try_parse_from(["sculk", "host", "-p", "25565"]);
         assert!(cli_res.is_ok(), "parse host");
         let cli = if let Ok(v) = cli_res { v } else { return };
         assert!(matches!(cli.command, Commands::Host { port: 25565, .. }));
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn parse_join_defaults() {
-        let cli_res = Cli::try_parse_from(["sckc", "join", "sculk://join/v1/payload"]);
+        let cli_res = Cli::try_parse_from(["sculk", "join", "sculk://join/v1/payload"]);
         assert!(cli_res.is_ok(), "parse join");
         let cli = if let Ok(v) = cli_res { v } else { return };
         assert!(matches!(cli.command, Commands::Join { port: None, .. }));

@@ -13,8 +13,7 @@
 >
 > sculk 做的事类似，在玩家之间建立隐匿的隧道，让连接自然发生。
 
-- `sckc`：命令行客户端（CLI）
-- `sckt`：终端图形客户端（TUI）
+- `sculk`：命令行客户端（CLI）
 - `sculk`：隧道核心库
 
 ## 快速开始
@@ -40,13 +39,10 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/KercyDing/sculk/main/scrip
 
 ```sh
 # 建房
-sckc host
+sculk host
 
 # 加入
-sckc join "sculk://..."
-
-# 启动 TUI
-sckt
+sculk join "sculk://..."
 ```
 
 详见文档：
@@ -58,7 +54,7 @@ sculk 会优先尝试建立 P2P 直连；当双方受 NAT、网络策略或运�
 
 项目默认使用 iroh 提供的公共 Relay，开箱即用，但其可用性、网络延迟和带宽不由 sculk 控制，部分地区或复杂网络环境下可能出现连接缓慢、不稳定或无法连接。sculk 本身也不提供公共 Relay 的可用性保证。
 
-如果需要更稳定的入口、更合适的服务器地域，或者希望自行控制带宽和服务可用性，可以部署专用 Relay，并在 `sckc`、`sckt` 或上层应用中配置其 URL。
+如果需要更稳定的入口、更合适的服务器地域，或者希望自行控制带宽和服务可用性，可以部署专用 Relay，并在 `sculk` CLI 或上层应用中配置其 URL。
 
 部署方法和可直接使用的构建产物见：[iroh-relay](https://github.com/KercyDing/iroh-relay)
 
@@ -66,11 +62,10 @@ sculk 会优先尝试建立 P2P 直连；当双方受 NAT、网络策略或运�
 
 开发需要 Rust `1.91.0` 或更高版本，并使用 [`only`](https://github.com/KercyDing/only) 运行项目任务；`cargo-nextest` 为可选依赖。
 
-Workspace 包含三个 crate：
+Workspace 包含两个 crate：
 
 - `core`：隧道核心库（`sculk`）
-- `cli`：命令行客户端（`sculk-cli` / `sckc`）
-- `tui`：终端图形客户端（`sculk-tui` / `sckt`）
+- `cli`：命令行客户端（`sculk-cli` / `sculk`）
 
 常用命令：
 
@@ -79,7 +74,7 @@ only check       # 格式、编译与 Clippy 检查
 only ci          # 检查并运行开发测试
 only dev build   # 开发构建
 only rel build   # 发布构建
-only install     # 构建并安装 sckc 和 sckt
+only install     # 构建并安装 sculk CLI
 ```
 
 ## 许可证
