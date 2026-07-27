@@ -96,6 +96,8 @@ struct NodeInner {
     endpoint: Endpoint,
     relay_url: Option<RelayUrl>,
     services: RwLock<HashMap<ServiceId, Arc<HostedService>>>,
+    unauthenticated_slots: Arc<tokio::sync::Semaphore>,
+    unauthenticated_connections_max: usize,
     shutdown: watch::Sender<bool>,
 }
 
@@ -107,6 +109,7 @@ struct HostedService {
     events_tx: mpsc::Sender<TunnelEvent>,
     updates_tx: broadcast::Sender<TunnelEvent>,
     rotation_tx: watch::Sender<u64>,
+    status: Arc<HostedStatus>,
 }
 
 /// 已发布服务的轻量操作句柄。
@@ -119,8 +122,29 @@ pub struct HostedServiceHandle {
 /// Node 的稳定状态快照。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SculkNodeStatus {
+    /// Stable EndpointId owned by this Node.
+    pub endpoint_id: EndpointId,
+    /// Whether the underlying Endpoint is still open.
+    pub online: bool,
+    /// Custom Node-level Relay configuration, if one is configured.
+    pub relay_url: Option<RelayUrl>,
     /// 当前已发布服务数。
     pub service_count: usize,
+    /// Connections currently waiting for authentication.
+    pub unauthenticated_connection_count: usize,
+    /// Configured global authentication concurrency limit.
+    pub unauthenticated_connections_max: usize,
+}
+
+/// Lifecycle of a service registered in a [`SculkNode`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostedServicePhase {
+    /// Service is registered and accepts new authenticated connections.
+    Active,
+    /// Service was removed from routing and its existing connections are closing.
+    Stopping,
+    /// Service and its tracked connections have been stopped.
+    Stopped,
 }
 
 /// 单个已发布服务的稳定状态快照。
@@ -128,8 +152,120 @@ pub struct SculkNodeStatus {
 pub struct HostedServiceStatus {
     /// 服务标识。
     pub service_id: ServiceId,
+    /// Current service lifecycle phase.
+    pub phase: HostedServicePhase,
+    /// Generation of the currently published Join URI.
+    pub uri_generation: u64,
     /// 当前已认证且仍存活的连接数量。
     pub connection_count: usize,
+    /// Currently active TCP-to-QUIC bridges.
+    pub bridge_count: usize,
+    /// Most recent structured runtime error affecting this service.
+    pub last_error: Option<ErrorCategory>,
+}
+
+/// Recoverable service status subscription.
+pub struct HostedServiceStatusSubscription {
+    status: watch::Receiver<HostedServiceStatus>,
+    initial_status_pending: bool,
+}
+
+impl HostedServiceStatusSubscription {
+    /// Receives the current status first and then every subsequent status change.
+    pub async fn recv(&mut self) -> Option<HostedServiceStatus> {
+        if self.initial_status_pending {
+            self.initial_status_pending = false;
+            return Some(self.status.borrow().clone());
+        }
+        self.status.changed().await.ok()?;
+        Some(self.status.borrow().clone())
+    }
+}
+
+pub(super) struct HostedStatus {
+    current: Mutex<HostedServiceStatus>,
+    status_tx: watch::Sender<HostedServiceStatus>,
+}
+
+impl HostedStatus {
+    fn new(service_id: ServiceId) -> Arc<Self> {
+        let initial = HostedServiceStatus {
+            service_id,
+            phase: HostedServicePhase::Active,
+            uri_generation: 1,
+            connection_count: 0,
+            bridge_count: 0,
+            last_error: None,
+        };
+        let (status_tx, _) = watch::channel(initial.clone());
+        Arc::new(Self {
+            current: Mutex::new(initial),
+            status_tx,
+        })
+    }
+
+    fn snapshot(&self) -> HostedServiceStatus {
+        self.lock().clone()
+    }
+
+    fn subscribe(&self) -> HostedServiceStatusSubscription {
+        HostedServiceStatusSubscription {
+            status: self.status_tx.subscribe(),
+            initial_status_pending: true,
+        }
+    }
+
+    fn set_phase(&self, phase: HostedServicePhase) {
+        self.update(|status| status.phase = phase);
+    }
+
+    pub(super) fn set_connection_count(&self, count: usize) {
+        self.update(|status| status.connection_count = count);
+    }
+
+    pub(super) fn bridge_started(self: &Arc<Self>) -> HostedBridgeGuard {
+        self.update(|status| {
+            status.bridge_count = status.bridge_count.saturating_add(1);
+        });
+        HostedBridgeGuard {
+            status: self.clone(),
+        }
+    }
+
+    pub(super) fn set_error(&self, category: ErrorCategory) {
+        self.update(|status| status.last_error = Some(category));
+    }
+
+    fn rotate_uri(&self) {
+        self.update(|status| {
+            status.uri_generation = status.uri_generation.saturating_add(1);
+        });
+    }
+
+    fn update(&self, change: impl FnOnce(&mut HostedServiceStatus)) {
+        let mut status = self.lock();
+        change(&mut status);
+        self.status_tx.send_replace(status.clone());
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HostedServiceStatus> {
+        match self.current.lock() {
+            Ok(status) => status,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
+pub(super) struct HostedBridgeGuard {
+    status: Arc<HostedStatus>,
+}
+
+impl Drop for HostedBridgeGuard {
+    fn drop(&mut self) {
+        self.status.update(|status| {
+            status.bridge_count = status.bridge_count.saturating_sub(1);
+        });
+    }
 }
 
 impl SculkNode {
@@ -144,18 +280,23 @@ impl SculkNode {
         endpoint.online().await;
 
         let (shutdown, shutdown_rx) = watch::channel(false);
+        let unauthenticated_connections_max = options.unauthenticated_connections_max.get();
+        let unauthenticated_slots =
+            Arc::new(tokio::sync::Semaphore::new(unauthenticated_connections_max));
         let node = Self {
             inner: Arc::new(NodeInner {
                 endpoint: endpoint.clone(),
                 relay_url: options.relay_url,
                 services: RwLock::new(HashMap::new()),
+                unauthenticated_slots,
+                unauthenticated_connections_max,
                 shutdown,
             }),
         };
         tokio::spawn(node_accept_loop(
-            node.clone(),
+            Arc::downgrade(&node.inner),
             endpoint,
-            options.unauthenticated_connections_max.get(),
+            node.inner.unauthenticated_slots.clone(),
             shutdown_rx,
         ));
         Ok(node)
@@ -173,6 +314,7 @@ impl SculkNode {
         let (events_tx, mut events_rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let (updates_tx, _) = broadcast::channel(EVENT_CHANNEL_SIZE);
         let (rotation_tx, rotation_rx) = watch::channel(0_u64);
+        let status = HostedStatus::new(options.service_id);
         let updates_tx_for_task = updates_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = events_rx.recv().await {
@@ -190,10 +332,12 @@ impl SculkNode {
                 service_id: options.service_id,
                 token: options.token,
                 max_players: options.config.max_players,
+                status: Some(status.clone()),
             }),
             events_tx,
             updates_tx,
             rotation_tx,
+            status,
         });
         let mut services = self.inner.services.write().await;
         if services.contains_key(&options.service_id) {
@@ -226,6 +370,7 @@ impl SculkNode {
             .await
             .remove(&service_id)
             .ok_or(SculkNodeError::ServiceNotFound)?;
+        service.status.set_phase(HostedServicePhase::Stopping);
         let mut conns = service
             .context
             .conns
@@ -236,6 +381,7 @@ impl SculkNode {
                 conn.close(CLOSE_AUTH_FAILED, b"service stopped");
             }
         }
+        service.status.set_phase(HostedServicePhase::Stopped);
         Ok(())
     }
 
@@ -246,8 +392,17 @@ impl SculkNode {
 
     /// 返回 Node 的稳定状态快照。
     pub async fn status(&self) -> SculkNodeStatus {
+        let available = self.inner.unauthenticated_slots.available_permits();
         SculkNodeStatus {
+            endpoint_id: self.inner.endpoint.id(),
+            online: !self.inner.endpoint.is_closed(),
+            relay_url: self.inner.relay_url.clone(),
             service_count: self.service_count().await,
+            unauthenticated_connection_count: self
+                .inner
+                .unauthenticated_connections_max
+                .saturating_sub(available),
+            unauthenticated_connections_max: self.inner.unauthenticated_connections_max,
         }
     }
 
@@ -276,6 +431,7 @@ impl SculkNode {
             .ok_or(SculkNodeError::ServiceNotFound)?;
         let new_token = AccessToken::generate();
         *service.token.write().await = new_token.clone();
+        service.status.rotate_uri();
         if reset_timer {
             service
                 .rotation_tx
@@ -298,7 +454,24 @@ impl SculkNode {
     /// 停止所有服务并关闭 Node Endpoint。
     pub async fn close(&self) {
         let _ = self.inner.shutdown.send(true);
-        self.inner.services.write().await.clear();
+        let services = {
+            let mut services = self.inner.services.write().await;
+            services
+                .drain()
+                .map(|(_, service)| service)
+                .collect::<Vec<_>>()
+        };
+        for service in services {
+            service.status.set_phase(HostedServicePhase::Stopping);
+            if let Ok(mut conns) = service.context.conns.lock() {
+                for tracked in conns.drain(..) {
+                    if let Some(conn) = tracked.handle.upgrade() {
+                        conn.close(CLOSE_AUTH_FAILED, b"node stopped");
+                    }
+                }
+            }
+            service.status.set_phase(HostedServicePhase::Stopped);
+        }
         self.inner.endpoint.close().await;
     }
 }
@@ -373,16 +546,7 @@ impl HostedServiceHandle {
             .get(&self.service_id)
             .cloned()
             .ok_or(SculkNodeError::ServiceNotFound)?;
-        let connections = service
-            .context
-            .conns
-            .lock()
-            .map_err(|_| SculkNodeError::ServiceNotFound)?;
-        let connection_count = connections.iter().filter(|conn| conn.is_alive()).count();
-        Ok(HostedServiceStatus {
-            service_id: service.service_id,
-            connection_count,
-        })
+        Ok(service.status.snapshot())
     }
 
     /// 独立停止此服务。
@@ -408,24 +572,51 @@ impl HostedServiceHandle {
             .map(|service| service.updates_tx.subscribe())
             .ok_or(SculkNodeError::ServiceNotFound)
     }
+
+    /// Subscribes to recoverable status snapshots for this service.
+    pub async fn subscribe_status(
+        &self,
+    ) -> std::result::Result<HostedServiceStatusSubscription, SculkNodeError> {
+        self.node
+            .inner
+            .services
+            .read()
+            .await
+            .get(&self.service_id)
+            .map(|service| service.status.subscribe())
+            .ok_or(SculkNodeError::ServiceNotFound)
+    }
 }
 
 async fn node_accept_loop(
-    node: SculkNode,
+    inner: std::sync::Weak<NodeInner>,
     endpoint: Endpoint,
-    unauthenticated_connections_max: usize,
+    unauthenticated_slots: Arc<tokio::sync::Semaphore>,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let slots = Arc::new(tokio::sync::Semaphore::new(unauthenticated_connections_max));
     loop {
         let accepting = tokio::select! {
-            _ = super::wait_for_shutdown(&mut shutdown) => return,
+            _ = super::wait_for_shutdown(&mut shutdown) => {
+                endpoint.close().await;
+                return;
+            },
             accepting = endpoint.accept() => match accepting { Some(value) => value, None => return },
         };
-        let Ok(permit) = slots.clone().acquire_owned().await else {
+        let permit = tokio::select! {
+            _ = super::wait_for_shutdown(&mut shutdown) => {
+                endpoint.close().await;
+                return;
+            }
+            permit = unauthenticated_slots.clone().acquire_owned() => {
+                let Ok(permit) = permit else { return };
+                permit
+            }
+        };
+        let Some(inner) = inner.upgrade() else {
+            endpoint.close().await;
             return;
         };
-        let node = node.clone();
+        let node = SculkNode { inner };
         tokio::spawn(async move {
             let _permit = permit;
             let Ok(Ok(conn)) = tokio::time::timeout(Duration::from_secs(10), accepting).await
@@ -466,7 +657,7 @@ async fn route_connection(node: &SculkNode, conn: Connection) -> crate::Result<(
     };
     start_authenticated_host_connection(
         conn,
-        service.target_addr.port(),
+        service.target_addr,
         &service.events_tx,
         &service.context,
     )
@@ -478,12 +669,41 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    async fn recv_status_where(
+        updates: &mut HostedServiceStatusSubscription,
+        predicate: impl Fn(&HostedServiceStatus) -> bool,
+    ) -> Option<HostedServiceStatus> {
+        for _ in 0..16 {
+            let update = tokio::time::timeout(Duration::from_secs(5), updates.recv()).await;
+            let Ok(Some(status)) = update else {
+                return None;
+            };
+            if predicate(&status) {
+                return Some(status);
+            }
+        }
+        None
+    }
+
+    async fn join_node(
+        node: &SculkNode,
+        uri: &JoinUri,
+    ) -> crate::Result<(IrohTunnel, mpsc::Receiver<TunnelEvent>)> {
+        IrohTunnel::join_direct(uri, node.inner.endpoint.addr(), 0, JoinConfig::default()).await
+    }
+
     #[tokio::test]
     async fn rejects_non_loopback_targets() {
         let target = "192.168.1.2:25565".parse();
         assert!(target.is_ok());
         let result = validate_target(target.unwrap_or_else(|_| unreachable!()));
         assert!(matches!(result, Err(SculkNodeError::TargetNotLoopback)));
+
+        let zero_port = SocketAddr::from(([127, 0, 0, 1], 0));
+        assert!(matches!(
+            validate_target(zero_port),
+            Err(SculkNodeError::InvalidTargetPort)
+        ));
     }
 
     #[tokio::test]
@@ -505,6 +725,27 @@ mod tests {
             })
             .await;
         assert!(first.is_ok());
+        let Ok(first) = first else {
+            node.close().await;
+            return;
+        };
+        let first_status = first.subscribe_status().await;
+        assert!(first_status.is_ok());
+        let Ok(mut first_status) = first_status else {
+            node.close().await;
+            return;
+        };
+        let initial = first_status.recv().await;
+        assert!(matches!(
+            initial,
+            Some(HostedServiceStatus {
+                phase: HostedServicePhase::Active,
+                uri_generation: 1,
+                connection_count: 0,
+                bridge_count: 0,
+                ..
+            })
+        ));
         let second = node
             .start_service(HostedServiceOptions {
                 service_id: second_id,
@@ -518,7 +759,16 @@ mod tests {
         let Ok(second) = second else {
             return;
         };
-        assert_eq!(node.status().await.service_count, 2);
+        let node_status = node.status().await;
+        assert_eq!(node_status.endpoint_id, node.endpoint_id());
+        assert!(node_status.online);
+        assert!(node_status.relay_url.is_none());
+        assert_eq!(node_status.service_count, 2);
+        assert_eq!(node_status.unauthenticated_connection_count, 0);
+        assert_eq!(
+            node_status.unauthenticated_connections_max,
+            NODE_UNAUTHENTICATED_CONNECTIONS_MAX.get()
+        );
         let second_status = second.status().await;
         assert!(second_status.is_ok());
         assert_eq!(
@@ -540,20 +790,41 @@ mod tests {
         assert_eq!(first_uri.endpoint_id(), rotated_uri.endpoint_id());
         assert_eq!(first_uri.service_id(), rotated_uri.service_id());
         assert!(!first_uri.token().matches(rotated_uri.token()));
+        let second_status = second.status().await;
+        assert_eq!(
+            second_status.ok().map(|status| status.uri_generation),
+            Some(2)
+        );
         let rotated = tokio::time::timeout(Duration::from_secs(1), updates.recv()).await;
         assert!(matches!(rotated, Ok(Ok(TunnelEvent::TokenRotated))));
         assert_eq!(node.service_count().await, 2);
 
         let stopped = node.stop_service(first_id).await;
         assert!(stopped.is_ok());
+        let stopped_status = first_status.recv().await;
+        assert!(matches!(
+            stopped_status,
+            Some(HostedServiceStatus {
+                phase: HostedServicePhase::Stopped,
+                ..
+            })
+        ));
+        assert!(matches!(
+            first.status().await,
+            Err(SculkNodeError::ServiceNotFound)
+        ));
         assert_eq!(node.service_count().await, 1);
         assert!(second.join_uri().await.is_ok());
         node.close().await;
+        let closed = node.status().await;
+        assert!(!closed.online);
+        assert_eq!(closed.service_count, 0);
     }
 
     #[tokio::test]
     async fn joins_and_forwards_to_the_selected_service() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await;
+        // IPv6 loopback proves routing preserves the full SocketAddr, not only the target port.
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await;
         assert!(listener.is_ok());
         let Ok(listener) = listener else {
             return;
@@ -563,6 +834,7 @@ mod tests {
         let Ok(target_addr) = target_addr else {
             return;
         };
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
@@ -570,8 +842,276 @@ mod tests {
             let mut data = [0_u8; 4];
             if stream.read_exact(&mut data).await.is_ok() {
                 let _ = stream.write_all(&data).await;
+                let _ = release_rx.await;
             }
         });
+
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id: ServiceId::generate(),
+                target_addr,
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(service.is_ok());
+        let Ok(service) = service else {
+            node.close().await;
+            return;
+        };
+        let status_updates = service.subscribe_status().await;
+        assert!(status_updates.is_ok());
+        let Ok(mut status_updates) = status_updates else {
+            node.close().await;
+            return;
+        };
+        assert!(status_updates.recv().await.is_some());
+        let uri = service.join_uri().await;
+        assert!(uri.is_ok());
+        let Ok(uri) = uri else {
+            node.close().await;
+            return;
+        };
+        let join = join_node(&node, &uri).await;
+        assert!(join.is_ok());
+        let Ok((join, _)) = join else {
+            node.close().await;
+            return;
+        };
+        let connected =
+            recv_status_where(&mut status_updates, |status| status.connection_count == 1).await;
+        assert!(
+            connected.is_some(),
+            "authenticated connection status missing"
+        );
+        let local_addr = join.local_addr();
+        assert!(local_addr.is_some());
+        let Some(local_addr) = local_addr else {
+            join.close().await;
+            node.close().await;
+            return;
+        };
+        let client = tokio::net::TcpStream::connect(local_addr).await;
+        assert!(client.is_ok());
+        let Ok(mut client) = client else {
+            join.close().await;
+            node.close().await;
+            return;
+        };
+        let write = client.write_all(b"ping").await;
+        assert!(write.is_ok());
+        let mut echoed = [0_u8; 4];
+        let read =
+            tokio::time::timeout(Duration::from_secs(5), client.read_exact(&mut echoed)).await;
+        assert!(matches!(read, Ok(Ok(_))));
+        assert_eq!(&echoed, b"ping");
+        let bridging =
+            recv_status_where(&mut status_updates, |status| status.bridge_count == 1).await;
+        assert!(bridging.is_some(), "active bridge status missing");
+        let _ = release_tx.send(());
+        drop(client);
+        let bridge_closed =
+            recv_status_where(&mut status_updates, |status| status.bridge_count == 0).await;
+        assert!(bridge_closed.is_some(), "closed bridge status missing");
+        join.close().await;
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn rejects_duplicate_service_ids() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service_id = ServiceId::generate();
+        let first = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(first.is_ok());
+        let duplicate = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25566)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await;
+        assert!(matches!(duplicate, Err(SculkNodeError::DuplicateService)));
+        assert_eq!(node.service_count().await, 1);
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn dropping_last_node_handle_closes_endpoint() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let observer = node.inner.endpoint.clone();
+        drop(node);
+
+        let closed = tokio::time::timeout(Duration::from_secs(3), observer.closed()).await;
+        assert!(closed.is_ok(), "Node Endpoint remained open after drop");
+    }
+
+    #[tokio::test]
+    async fn enforces_service_connection_limit() {
+        let node = SculkNode::bind(NodeOptions::default()).await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id: ServiceId::generate(),
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::new().max_players(Some(1)),
+            })
+            .await;
+        assert!(service.is_ok());
+        let Ok(service) = service else {
+            node.close().await;
+            return;
+        };
+        let uri = service.join_uri().await;
+        assert!(uri.is_ok());
+        let Ok(uri) = uri else {
+            node.close().await;
+            return;
+        };
+        let status = service.subscribe_status().await;
+        assert!(status.is_ok());
+        let Ok(mut status) = status else {
+            node.close().await;
+            return;
+        };
+        assert!(status.recv().await.is_some());
+        let events = service.subscribe().await;
+        assert!(events.is_ok());
+        let Ok(mut events) = events else {
+            node.close().await;
+            return;
+        };
+
+        let first = join_node(&node, &uri).await;
+        assert!(first.is_ok());
+        let Ok((first, _)) = first else {
+            node.close().await;
+            return;
+        };
+        let first_connected =
+            recv_status_where(&mut status, |status| status.connection_count == 1).await;
+        assert!(first_connected.is_some());
+
+        let second = join_node(&node, &uri).await;
+        let second = second.ok().map(|(tunnel, _)| tunnel);
+        let rejected = async {
+            for _ in 0..16 {
+                let event = events.recv().await.ok()?;
+                if matches!(event, TunnelEvent::PlayerRejected { .. }) {
+                    return Some(());
+                }
+            }
+            None
+        };
+        let rejected = tokio::time::timeout(Duration::from_secs(5), rejected).await;
+        assert!(matches!(rejected, Ok(Some(()))));
+        assert_eq!(
+            service
+                .status()
+                .await
+                .ok()
+                .map(|status| status.connection_count),
+            Some(1)
+        );
+
+        if let Some(second) = second {
+            second.close().await;
+        }
+        first.close().await;
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn bounds_unauthenticated_connections_globally() {
+        let node = SculkNode::bind(NodeOptions {
+            unauthenticated_connections_max: NonZeroUsize::MIN,
+            ..NodeOptions::default()
+        })
+        .await;
+        assert!(node.is_ok());
+        let Ok(node) = node else {
+            return;
+        };
+        let client_a = build_endpoint(None, None).bind().await;
+        assert!(client_a.is_ok());
+        let Ok(client_a) = client_a else {
+            node.close().await;
+            return;
+        };
+        let node_addr = node.inner.endpoint.addr();
+        let conn_a = client_a.connect(node_addr, ALPN).await;
+        assert!(conn_a.is_ok());
+        let Ok(conn_a) = conn_a else {
+            client_a.close().await;
+            node.close().await;
+            return;
+        };
+
+        let bounded = async {
+            for _ in 0..100 {
+                let status = node.status().await;
+                if status.unauthenticated_connection_count == 1 {
+                    return Some(status);
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            None
+        };
+        let bounded = tokio::time::timeout(Duration::from_secs(3), bounded).await;
+        assert!(matches!(
+            bounded,
+            Ok(Some(SculkNodeStatus {
+                unauthenticated_connection_count: 1,
+                unauthenticated_connections_max: 1,
+                ..
+            }))
+        ));
+
+        conn_a.close(CLOSE_AUTH_FAILED, b"test complete");
+        client_a.close().await;
+        node.close().await;
+    }
+
+    #[tokio::test]
+    async fn records_target_connection_failures_in_status() {
+        let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await;
+        assert!(unused.is_ok());
+        let Ok(unused) = unused else {
+            return;
+        };
+        let target_addr = unused.local_addr();
+        assert!(target_addr.is_ok());
+        let Ok(target_addr) = target_addr else {
+            return;
+        };
 
         let node = SculkNode::bind(NodeOptions::default()).await;
         assert!(node.is_ok());
@@ -598,7 +1138,7 @@ mod tests {
             node.close().await;
             return;
         };
-        let join = IrohTunnel::join(&uri, 0, JoinConfig::default()).await;
+        let join = join_node(&node, &uri).await;
         assert!(join.is_ok());
         let Ok((join, _)) = join else {
             node.close().await;
@@ -611,6 +1151,7 @@ mod tests {
             node.close().await;
             return;
         };
+        drop(unused);
         let client = tokio::net::TcpStream::connect(local_addr).await;
         assert!(client.is_ok());
         let Ok(mut client) = client else {
@@ -618,13 +1159,20 @@ mod tests {
             node.close().await;
             return;
         };
-        let write = client.write_all(b"ping").await;
-        assert!(write.is_ok());
-        let mut echoed = [0_u8; 4];
-        let read =
-            tokio::time::timeout(Duration::from_secs(5), client.read_exact(&mut echoed)).await;
-        assert!(matches!(read, Ok(Ok(_))));
-        assert_eq!(&echoed, b"ping");
+        assert!(client.write_all(b"ping").await.is_ok());
+
+        let error_recorded = async {
+            for _ in 0..100 {
+                let status = service.status().await.ok()?;
+                if status.last_error == Some(ErrorCategory::TargetUnavailable) {
+                    return Some(());
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            None
+        };
+        let error_recorded = tokio::time::timeout(Duration::from_secs(7), error_recorded).await;
+        assert!(matches!(error_recorded, Ok(Some(()))));
         join.close().await;
         node.close().await;
     }
@@ -663,9 +1211,9 @@ mod tests {
             return;
         };
 
-        let old_join = IrohTunnel::join(&old_uri, 0, JoinConfig::default()).await;
+        let old_join = join_node(&node, &old_uri).await;
         assert!(old_join.is_err());
-        let new_join = IrohTunnel::join(&rotated_uri, 0, JoinConfig::default()).await;
+        let new_join = join_node(&node, &rotated_uri).await;
         assert!(new_join.is_ok());
         if let Ok((join, _)) = new_join {
             join.close().await;

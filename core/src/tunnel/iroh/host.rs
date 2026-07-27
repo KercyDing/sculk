@@ -1,9 +1,12 @@
 //! host 侧连接接受循环与玩家会话管理。
 
+use std::net::SocketAddr;
+
 use super::*;
 
 use super::auth::auth_verify;
 use super::monitor::spawn_path_monitor;
+use super::node::HostedStatus;
 use super::session::HostSessions;
 use super::transport::bridge;
 use crate::types::{AccessToken, ServiceId};
@@ -19,12 +22,13 @@ pub(super) struct HostContext {
     pub(super) service_id: ServiceId,
     pub(super) token: AccessToken,
     pub(super) max_players: Option<u32>,
+    pub(super) status: Option<Arc<HostedStatus>>,
 }
 
 /// Host 侧连接循环。
 pub(super) async fn host_accept_loop(
     endpoint: Endpoint,
-    mc_port: u16,
+    target_addr: SocketAddr,
     tx: mpsc::Sender<TunnelEvent>,
     ctx: Arc<HostContext>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -74,7 +78,7 @@ pub(super) async fn host_accept_loop(
                     return;
                 }
             };
-            if let Err(e) = start_host_connection(conn, mc_port, &tx, &ctx).await {
+            if let Err(e) = start_host_connection(conn, target_addr, &tx, &ctx).await {
                 super::emit_event(
                     &tx,
                     TunnelEvent::Error {
@@ -88,12 +92,12 @@ pub(super) async fn host_accept_loop(
 
 async fn start_host_connection(
     conn: Connection,
-    mc_port: u16,
+    target_addr: SocketAddr,
     tx: &mpsc::Sender<TunnelEvent>,
     ctx: &HostContext,
 ) -> crate::Result<()> {
     match auth_verify(&conn, ctx.service_id, &ctx.token).await {
-        Ok(true) => start_authenticated_host_connection(conn, mc_port, tx, ctx).await,
+        Ok(true) => start_authenticated_host_connection(conn, target_addr, tx, ctx).await,
         Ok(false) | Err(_) => {
             let remote_id = PeerId::new(conn.remote_id().fmt_short().to_string());
             tracing::info!(remote = %remote_id, "access token rejected");
@@ -112,7 +116,7 @@ async fn start_host_connection(
 /// 在 Node 已完成服务路由与认证后，继续处理该服务的连接。
 pub(super) async fn start_authenticated_host_connection(
     conn: Connection,
-    mc_port: u16,
+    target_addr: SocketAddr,
     tx: &mpsc::Sender<TunnelEvent>,
     ctx: &HostContext,
 ) -> crate::Result<()> {
@@ -120,7 +124,7 @@ pub(super) async fn start_authenticated_host_connection(
     let remote_id = PeerId::new(remote_endpoint_id.fmt_short().to_string());
     tracing::info!(remote = %remote_id, "player connected");
 
-    let Some((generation, is_reconnect, old_conn)) = register_session_with_grace(
+    let Some((generation, is_reconnect, old_conn, connection_count)) = register_session_with_grace(
         ctx.sessions.clone(),
         remote_endpoint_id,
         conn.clone(),
@@ -139,6 +143,9 @@ pub(super) async fn start_authenticated_host_connection(
         spawn_rejected_conn_cleanup(conn, CLOSE_SERVER_FULL, b"server full", remote_id);
         return Ok(());
     };
+    if let Some(status) = &ctx.status {
+        status.set_connection_count(connection_count);
+    }
     if let Some(old_conn) = old_conn {
         old_conn.close(CLOSE_REPLACED_BY_RECONNECT, b"replaced by reconnect");
     }
@@ -162,19 +169,27 @@ pub(super) async fn start_authenticated_host_connection(
     let tx_left = tx.clone();
     let left_id = remote_id.clone();
     let sessions_on_close = ctx.sessions.clone();
+    let status_on_close = ctx.status.clone();
     tokio::spawn(async move {
         let reason = match conn_handle.closed().await {
             Some(closed) => closed.reason.to_string(),
             None => "connection closed".to_string(),
         };
         let mut lock_error = None;
-        let should_emit_left = match super::lock_mutex(&sessions_on_close, "host sessions") {
-            Ok(mut guard) => guard.remove_if_current(&remote_endpoint_id, generation),
-            Err(e) => {
-                lock_error = Some(e);
-                false
-            }
-        };
+        let (should_emit_left, connection_count) =
+            match super::lock_mutex(&sessions_on_close, "host sessions") {
+                Ok(mut guard) => {
+                    let removed = guard.remove_if_current(&remote_endpoint_id, generation);
+                    (removed, Some(guard.active_players()))
+                }
+                Err(e) => {
+                    lock_error = Some(e);
+                    (false, None)
+                }
+            };
+        if let (Some(status), Some(connection_count)) = (status_on_close, connection_count) {
+            status.set_connection_count(connection_count);
+        }
         if let Some(e) = lock_error {
             super::emit_event(
                 &tx_left,
@@ -196,8 +211,10 @@ pub(super) async fn start_authenticated_host_connection(
         }
     });
 
+    let status = ctx.status.clone();
+    let bridge_events = tx.clone();
     tokio::spawn(async move {
-        if let Err(e) = host_handle_conn(conn, mc_port).await {
+        if let Err(e) = host_handle_conn(conn, target_addr, status, bridge_events).await {
             tracing::debug!("connection ended: {e}");
         }
     });
@@ -210,11 +227,13 @@ async fn register_session_with_grace(
     incoming_id: EndpointId,
     conn: Connection,
     max_players: Option<u32>,
-) -> crate::Result<Option<(u64, bool, Option<Connection>)>> {
+) -> crate::Result<Option<(u64, bool, Option<Connection>, usize)>> {
     {
         let mut guard = super::lock_mutex(&sessions, "host sessions")?;
         if guard.has_capacity_for(&incoming_id, max_players) {
-            return Ok(Some(guard.upsert(incoming_id, conn)));
+            let (generation, is_reconnect, old_conn) = guard.upsert(incoming_id, conn);
+            let connection_count = guard.active_players();
+            return Ok(Some((generation, is_reconnect, old_conn, connection_count)));
         }
     }
 
@@ -224,7 +243,9 @@ async fn register_session_with_grace(
     if !guard.has_capacity_for(&incoming_id, max_players) {
         return Ok(None);
     }
-    Ok(Some(guard.upsert(incoming_id, conn)))
+    let (generation, is_reconnect, old_conn) = guard.upsert(incoming_id, conn);
+    let connection_count = guard.active_players();
+    Ok(Some((generation, is_reconnect, old_conn, connection_count)))
 }
 
 /// 拒绝连接后异步 close 并等待收敛。
@@ -243,23 +264,49 @@ fn spawn_rejected_conn_cleanup(
 }
 
 /// 处理单个连接内的双向流转发。
-async fn host_handle_conn(conn: Connection, mc_port: u16) -> crate::Result<()> {
+async fn host_handle_conn(
+    conn: Connection,
+    target_addr: SocketAddr,
+    status: Option<Arc<HostedStatus>>,
+    events: mpsc::Sender<TunnelEvent>,
+) -> crate::Result<()> {
     loop {
         let (send, recv) = conn
             .accept_bi()
             .await
             .map_err(|e| crate::error::TunnelError::AcceptQuicBiStream(e.into()))?;
 
+        let status = status.clone();
+        let events = events.clone();
         tokio::spawn(async move {
-            let tcp = match TcpStream::connect(("127.0.0.1", mc_port)).await {
+            let tcp = match TcpStream::connect(target_addr).await {
                 Ok(tcp) => tcp,
                 Err(e) => {
-                    tracing::error!(mc_port, "failed to connect MC server: {e}");
+                    if let Some(status) = &status {
+                        status.set_error(crate::ErrorCategory::TargetUnavailable);
+                    }
+                    super::emit_event(
+                        &events,
+                        TunnelEvent::Error {
+                            message: format!("connect target server failed: {e}"),
+                        },
+                    );
+                    tracing::error!(%target_addr, "failed to connect target server: {e}");
                     return;
                 }
             };
+            let _bridge = status.as_ref().map(|status| status.bridge_started());
 
             if let Err(e) = bridge(send, recv, tcp).await {
+                if let Some(status) = &status {
+                    status.set_error(crate::ErrorCategory::Internal);
+                }
+                super::emit_event(
+                    &events,
+                    TunnelEvent::Error {
+                        message: format!("bridge ended with an error: {e}"),
+                    },
+                );
                 tracing::debug!("stream closed: {e}");
             }
         });

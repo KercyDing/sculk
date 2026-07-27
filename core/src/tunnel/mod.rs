@@ -12,8 +12,9 @@ pub use crate::types::{AccessToken, RelayUrl, SecretKey, ServiceId};
 pub use ::iroh::EndpointId;
 pub use event::{ConnectionSnapshot, HostConfig, JoinConfig, PeerId, TunnelEvent};
 pub use iroh::{
-    HostedServiceHandle, HostedServiceOptions, HostedServiceStatus, IrohTunnel, NodeOptions,
-    SculkNode, SculkNodeError, SculkNodeStatus,
+    HostedServiceHandle, HostedServiceOptions, HostedServicePhase, HostedServiceStatus,
+    HostedServiceStatusSubscription, IrohTunnel, NodeOptions, SculkNode, SculkNodeError,
+    SculkNodeStatus,
 };
 pub use join_uri::JoinUri;
 pub use service::{

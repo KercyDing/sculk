@@ -21,7 +21,7 @@ pub(super) struct JoinContext {
 /// Join 侧重连 supervisor。
 pub(super) async fn reconnect_supervisor(
     endpoint: Endpoint,
-    endpoint_id: iroh::EndpointId,
+    endpoint_addr: iroh::EndpointAddr,
     mut conn: Connection,
     tx: mpsc::Sender<TunnelEvent>,
     mut ctx: JoinContext,
@@ -105,7 +105,7 @@ pub(super) async fn reconnect_supervisor(
                 return;
             }
 
-            match endpoint.connect(endpoint_id, ALPN).await {
+            match endpoint.connect(endpoint_addr.clone(), ALPN).await {
                 Ok(new_conn) => {
                     if let Err(e) = auth_send(&new_conn, ctx.service_id, &ctx.token).await {
                         tracing::warn!(attempt, "reconnect auth failed: {e}");
@@ -202,7 +202,7 @@ fn is_auth_rejected(err: &crate::error::SculkError) -> bool {
 /// 含 auth的重试连接流程。
 pub(super) async fn connect_with_retry(
     endpoint: &Endpoint,
-    endpoint_id: iroh::EndpointId,
+    endpoint_addr: &iroh::EndpointAddr,
     service_id: ServiceId,
     token: &AccessToken,
     config: &JoinConfig,
@@ -226,7 +226,7 @@ pub(super) async fn connect_with_retry(
             tracing::info!("connecting to host...");
         }
 
-        match endpoint.connect(endpoint_id, ALPN).await {
+        match endpoint.connect(endpoint_addr.clone(), ALPN).await {
             Ok(conn) => {
                 auth_send(&conn, service_id, token).await?;
                 tracing::info!("connected to host");

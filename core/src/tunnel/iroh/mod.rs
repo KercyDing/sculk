@@ -1,6 +1,7 @@
 //! 基于 [iroh](https://iroh.computer) 的 P2P 隧道实现。
 //! 对外暴露 [`IrohTunnel`]，内部负责 host/join 的连接与转发流程。
 
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -34,8 +35,8 @@ use join::{JoinContext, connect_with_retry, reconnect_supervisor};
 use session::HostSessions;
 
 pub use node::{
-    HostedServiceHandle, HostedServiceOptions, HostedServiceStatus, NodeOptions, SculkNode,
-    SculkNodeError, SculkNodeStatus,
+    HostedServiceHandle, HostedServiceOptions, HostedServicePhase, HostedServiceStatus,
+    HostedServiceStatusSubscription, NodeOptions, SculkNode, SculkNodeError, SculkNodeStatus,
 };
 
 const ALPN: &[u8] = b"/sculk/node/1";
@@ -155,8 +156,10 @@ impl IrohTunnel {
                 service_id,
                 token,
                 max_players: config.max_players,
+                status: None,
             });
-            if let Err(e) = host_accept_loop(ep, mc_port, tx.clone(), ctx, shutdown_rx).await {
+            let target_addr = SocketAddr::from(([127, 0, 0, 1], mc_port));
+            if let Err(e) = host_accept_loop(ep, target_addr, tx.clone(), ctx, shutdown_rx).await {
                 emit_event(
                     &tx,
                     TunnelEvent::Error {
@@ -185,6 +188,21 @@ impl IrohTunnel {
         local_port: u16,
         config: JoinConfig,
     ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
+        Self::join_to(
+            join_uri,
+            iroh::EndpointAddr::from(join_uri.endpoint_id()),
+            local_port,
+            config,
+        )
+        .await
+    }
+
+    async fn join_to(
+        join_uri: &JoinUri,
+        endpoint_addr: iroh::EndpointAddr,
+        local_port: u16,
+        config: JoinConfig,
+    ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
         let endpoint = build_endpoint(None, join_uri.relay_url())
             .bind()
             .await
@@ -195,7 +213,7 @@ impl IrohTunnel {
 
         let conn = connect_with_retry(
             &endpoint,
-            join_uri.endpoint_id(),
+            &endpoint_addr,
             join_uri.service_id(),
             join_uri.token(),
             &config,
@@ -218,7 +236,6 @@ impl IrohTunnel {
 
         let ep = endpoint.clone();
         let conns_clone = conns.clone();
-        let endpoint_id = join_uri.endpoint_id();
         let service_id = join_uri.service_id();
         let token = join_uri.token().clone();
 
@@ -232,7 +249,7 @@ impl IrohTunnel {
                 token,
                 shutdown: shutdown_rx,
             };
-            reconnect_supervisor(ep, endpoint_id, conn, tx, ctx).await;
+            reconnect_supervisor(ep, endpoint_addr, conn, tx, ctx).await;
         });
 
         Ok((
@@ -245,6 +262,16 @@ impl IrohTunnel {
             },
             rx,
         ))
+    }
+
+    #[cfg(test)]
+    async fn join_direct(
+        join_uri: &JoinUri,
+        endpoint_addr: iroh::EndpointAddr,
+        local_port: u16,
+        config: JoinConfig,
+    ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
+        Self::join_to(join_uri, endpoint_addr, local_port, config).await
     }
 
     /// 返回当前活跃连接快照。

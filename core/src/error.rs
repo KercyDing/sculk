@@ -14,15 +14,27 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ErrorCategory {
+    /// A public Join URI is malformed or uses an unsupported protocol version.
     InvalidJoinUri,
+    /// Endpoint or Relay configuration cannot be used.
     InvalidEndpoint,
+    /// The Host rejected the supplied service credential.
     AuthorizationDenied,
+    /// The remote Host or its Relay path cannot be reached.
     HostUnreachable,
+    /// A configured local target service cannot be reached.
+    TargetUnavailable,
+    /// The requested local listener address cannot be bound.
     LocalPortUnavailable,
+    /// A persistent Node identity cannot be loaded or stored safely.
     IdentityUnavailable,
+    /// The requested lifecycle operation conflicts with current state.
     OperationConflict,
+    /// A configured connection or work limit was reached.
     ResourceLimit,
+    /// A caller supplied configuration value is invalid.
     InvalidConfiguration,
+    /// An invariant or lower-level operation failed without a recoverable product action.
     Internal,
 }
 
