@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::{RwLock, broadcast, mpsc, watch};
@@ -34,6 +35,8 @@ pub struct HostedServiceOptions {
     pub target_addr: SocketAddr,
     /// 当前会话授权令牌。
     pub token: AccessToken,
+    /// 自动轮换周期；`None` 表示直到服务停止才失效。
+    pub token_refresh: Option<Duration>,
     /// 服务级连接策略。
     pub config: HostConfig,
 }
@@ -50,6 +53,8 @@ pub enum SculkNodeError {
     DuplicateService,
     #[error("service is not published")]
     ServiceNotFound,
+    #[error("token refresh period must be greater than zero")]
+    InvalidRefreshPeriod,
     #[error("failed to bind Node endpoint")]
     BindEndpoint(#[source] crate::error::BoxError),
 }
@@ -69,11 +74,12 @@ struct NodeInner {
 
 struct HostedService {
     target_addr: SocketAddr,
-    token: AccessToken,
-    join_uri: JoinUri,
+    token: RwLock<AccessToken>,
+    service_id: ServiceId,
     context: Arc<HostContext>,
     events_tx: mpsc::Sender<TunnelEvent>,
     updates_tx: broadcast::Sender<TunnelEvent>,
+    rotation_tx: watch::Sender<u64>,
 }
 
 /// 已发布服务的轻量操作句柄。
@@ -113,14 +119,12 @@ impl SculkNode {
         options: HostedServiceOptions,
     ) -> std::result::Result<HostedServiceHandle, SculkNodeError> {
         validate_target(options.target_addr)?;
-        let join_uri = JoinUri::new(
-            self.inner.endpoint.id(),
-            options.service_id,
-            options.token.clone(),
-            self.inner.relay_url.clone(),
-        );
+        if options.token_refresh == Some(Duration::ZERO) {
+            return Err(SculkNodeError::InvalidRefreshPeriod);
+        }
         let (events_tx, mut events_rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let (updates_tx, _) = broadcast::channel(EVENT_CHANNEL_SIZE);
+        let (rotation_tx, rotation_rx) = watch::channel(0_u64);
         let updates_tx_for_task = updates_tx.clone();
         tokio::spawn(async move {
             while let Some(event) = events_rx.recv().await {
@@ -129,8 +133,8 @@ impl SculkNode {
         });
         let service = Arc::new(HostedService {
             target_addr: options.target_addr,
-            token: options.token.clone(),
-            join_uri,
+            token: RwLock::new(options.token.clone()),
+            service_id: options.service_id,
             context: Arc::new(HostContext {
                 conns: Arc::new(Mutex::new(Vec::new())),
                 sessions: Arc::new(Mutex::new(HostSessions::default())),
@@ -141,12 +145,21 @@ impl SculkNode {
             }),
             events_tx,
             updates_tx,
+            rotation_tx,
         });
         let mut services = self.inner.services.write().await;
         if services.contains_key(&options.service_id) {
             return Err(SculkNodeError::DuplicateService);
         }
         services.insert(options.service_id, service);
+        if let Some(period) = options.token_refresh {
+            tokio::spawn(rotation_loop(
+                Arc::downgrade(&self.inner),
+                options.service_id,
+                period,
+                rotation_rx,
+            ));
+        }
         Ok(HostedServiceHandle {
             node: self.clone(),
             service_id: options.service_id,
@@ -183,6 +196,45 @@ impl SculkNode {
         self.inner.services.read().await.len()
     }
 
+    /// 为指定服务生成新 Token，并返回对应的新 Join URI。
+    ///
+    /// 已认证的 QUIC 连接不受影响；后续新连接必须使用返回 URI 中的新 Token。
+    pub async fn rotate_token(
+        &self,
+        service_id: ServiceId,
+    ) -> std::result::Result<JoinUri, SculkNodeError> {
+        self.rotate_token_inner(service_id, true).await
+    }
+
+    async fn rotate_token_inner(
+        &self,
+        service_id: ServiceId,
+        reset_timer: bool,
+    ) -> std::result::Result<JoinUri, SculkNodeError> {
+        let service = self
+            .inner
+            .services
+            .read()
+            .await
+            .get(&service_id)
+            .cloned()
+            .ok_or(SculkNodeError::ServiceNotFound)?;
+        let new_token = AccessToken::generate();
+        *service.token.write().await = new_token.clone();
+        if reset_timer {
+            service
+                .rotation_tx
+                .send_modify(|generation| *generation = generation.wrapping_add(1));
+        }
+        super::emit_event(&service.events_tx, TunnelEvent::TokenRotated);
+        Ok(JoinUri::new(
+            self.inner.endpoint.id(),
+            service.service_id,
+            new_token,
+            self.inner.relay_url.clone(),
+        ))
+    }
+
     /// 返回 Node 的稳定 EndpointId。
     pub fn endpoint_id(&self) -> EndpointId {
         self.inner.endpoint.id()
@@ -193,6 +245,30 @@ impl SculkNode {
         let _ = self.inner.shutdown.send(true);
         self.inner.services.write().await.clear();
         self.inner.endpoint.close().await;
+    }
+}
+
+async fn rotation_loop(
+    inner: std::sync::Weak<NodeInner>,
+    service_id: ServiceId,
+    period: Duration,
+    mut reset_rx: watch::Receiver<u64>,
+) {
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(period) => {
+                let Some(inner) = inner.upgrade() else { return };
+                let node = SculkNode { inner };
+                if node.rotate_token_inner(service_id, false).await.is_err() {
+                    return;
+                }
+            }
+            changed = reset_rx.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -214,19 +290,31 @@ impl HostedServiceHandle {
 
     /// 返回当前可分享 Join URI。
     pub async fn join_uri(&self) -> std::result::Result<JoinUri, SculkNodeError> {
-        self.node
+        let service = self
+            .node
             .inner
             .services
             .read()
             .await
             .get(&self.service_id)
-            .map(|service| service.join_uri.clone())
-            .ok_or(SculkNodeError::ServiceNotFound)
+            .cloned()
+            .ok_or(SculkNodeError::ServiceNotFound)?;
+        Ok(JoinUri::new(
+            self.node.inner.endpoint.id(),
+            service.service_id,
+            service.token.read().await.clone(),
+            self.node.inner.relay_url.clone(),
+        ))
     }
 
     /// 独立停止此服务。
     pub async fn stop(&self) -> std::result::Result<(), SculkNodeError> {
         self.node.stop_service(self.service_id).await
+    }
+
+    /// 立即轮换服务的访问令牌，并返回新的 Join URI。
+    pub async fn rotate_token(&self) -> std::result::Result<JoinUri, SculkNodeError> {
+        self.node.rotate_token(self.service_id).await
     }
 
     /// 订阅此服务的过程事件。
@@ -285,9 +373,13 @@ async fn route_connection(node: &SculkNode, conn: Connection) -> crate::Result<(
         .await
         .get(&request.service_id)
         .cloned();
-    let valid = service
-        .as_ref()
-        .is_some_and(|service| request.token.matches(&service.token));
+    let valid = match &service {
+        Some(service) => {
+            let token = service.token.read().await;
+            request.token.matches(&token)
+        }
+        None => false,
+    };
     auth_respond(&mut send, valid).await?;
     let Some(service) = service.filter(|_| valid) else {
         conn.close(CLOSE_AUTH_FAILED, b"auth failed");
@@ -328,6 +420,7 @@ mod tests {
                 service_id: first_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
                 token: AccessToken::generate(),
+                token_refresh: None,
                 config: HostConfig::default(),
             })
             .await;
@@ -337,6 +430,7 @@ mod tests {
                 service_id: second_id,
                 target_addr: SocketAddr::from(([127, 0, 0, 1], 25566)),
                 token: AccessToken::generate(),
+                token_refresh: Some(Duration::from_millis(20)),
                 config: HostConfig::default(),
             })
             .await;
@@ -344,6 +438,23 @@ mod tests {
         let Ok(second) = second else {
             return;
         };
+        let updates = second.subscribe().await;
+        assert!(updates.is_ok());
+        let Ok(mut updates) = updates else {
+            return;
+        };
+        let first_uri = second.join_uri().await;
+        assert!(first_uri.is_ok());
+        let rotated_uri = second.rotate_token().await;
+        assert!(rotated_uri.is_ok());
+        let (Ok(first_uri), Ok(rotated_uri)) = (first_uri, rotated_uri) else {
+            return;
+        };
+        assert_eq!(first_uri.endpoint_id(), rotated_uri.endpoint_id());
+        assert_eq!(first_uri.service_id(), rotated_uri.service_id());
+        assert!(!first_uri.token().matches(rotated_uri.token()));
+        let rotated = tokio::time::timeout(Duration::from_secs(1), updates.recv()).await;
+        assert!(matches!(rotated, Ok(Ok(TunnelEvent::TokenRotated))));
         assert_eq!(node.service_count().await, 2);
 
         let stopped = node.stop_service(first_id).await;
