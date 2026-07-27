@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -15,15 +16,27 @@ use super::session::HostSessions;
 use super::*;
 use crate::types::{AccessToken, RelayUrl, SecretKey, ServiceId};
 
-const NODE_CONNECTION_TASKS_MAX: usize = 128;
+const NODE_UNAUTHENTICATED_CONNECTIONS_MAX: NonZeroUsize = NonZeroUsize::new(128).unwrap();
 
 /// 多服务 Node 的创建参数。
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct NodeOptions {
     /// 稳定 Node 密钥；`None` 时创建临时身份。
     pub secret_key: Option<SecretKey>,
     /// Node 级自定义 Relay；所有服务共享此配置。
     pub relay_url: Option<RelayUrl>,
+    /// 同时等待控制流认证的连接上限。
+    pub unauthenticated_connections_max: NonZeroUsize,
+}
+
+impl Default for NodeOptions {
+    fn default() -> Self {
+        Self {
+            secret_key: None,
+            relay_url: None,
+            unauthenticated_connections_max: NODE_UNAUTHENTICATED_CONNECTIONS_MAX,
+        }
+    }
 }
 
 /// 发布单个 Host 服务的参数。
@@ -109,7 +122,12 @@ impl SculkNode {
                 shutdown,
             }),
         };
-        tokio::spawn(node_accept_loop(node.clone(), endpoint, shutdown_rx));
+        tokio::spawn(node_accept_loop(
+            node.clone(),
+            endpoint,
+            options.unauthenticated_connections_max.get(),
+            shutdown_rx,
+        ));
         Ok(node)
     }
 
@@ -335,9 +353,10 @@ impl HostedServiceHandle {
 async fn node_accept_loop(
     node: SculkNode,
     endpoint: Endpoint,
+    unauthenticated_connections_max: usize,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let slots = Arc::new(tokio::sync::Semaphore::new(NODE_CONNECTION_TASKS_MAX));
+    let slots = Arc::new(tokio::sync::Semaphore::new(unauthenticated_connections_max));
     loop {
         let accepting = tokio::select! {
             _ = super::wait_for_shutdown(&mut shutdown) => return,
