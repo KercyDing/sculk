@@ -80,15 +80,20 @@ async fn auth_verify_inner(
 
 /// 接收控制流并解析固定长度请求；调用方必须始终回写一个统一的决定。
 pub(super) async fn auth_accept(conn: &Connection) -> crate::Result<(SendStream, ControlRequest)> {
-    let (send, mut recv) = conn
+    let (mut send, mut recv) = conn
         .accept_bi()
         .await
         .map_err(|e| crate::error::TunnelError::AcceptAuthStream(e.into()))?;
+    if recv.id().index() != 0 {
+        auth_respond(&mut send, false).await?;
+        return Err(crate::error::TunnelError::AuthRejectedByHost.into());
+    }
     let data = recv
         .read_to_end(CONTROL_REQUEST_LEN)
         .await
         .map_err(|e| crate::error::TunnelError::ReadAuthPayload(e.into()))?;
     if data.len() != CONTROL_REQUEST_LEN || data[0] != CONTROL_VERSION {
+        auth_respond(&mut send, false).await?;
         return Err(crate::error::TunnelError::AuthRejectedByHost.into());
     }
     let service_id = ServiceId::from_bytes(
