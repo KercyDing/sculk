@@ -108,27 +108,33 @@ enum Commands {
         /// Local Minecraft server port
         #[arg(short, long, default_value_t = sculk::DEFAULT_MC_PORT)]
         port: u16,
-        /// Generate and replace the secret key
-        #[arg(long)]
-        new_key: bool,
-        /// Path to the secret key file
-        #[arg(long)]
-        key_path: Option<PathBuf>,
         /// Override the relay URL from the profile
         #[arg(short, long)]
         relay: Option<String>,
-        /// Path status interval in seconds; 0 reports changes only
+        /// Path status interval in seconds
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
+        /// Share URI refresh policy
+        #[arg(
+            short = 't',
+            long = "time",
+            value_enum,
+            value_name = "TIME",
+            hide_possible_values = true
+        )]
+        token_refresh: Option<TokenRefresh>,
+        /// Generate and replace the secret key
+        #[arg(long)]
+        new_key: bool,
+        /// Generate a new Share URI for this host start
+        #[arg(long)]
+        new_uri: bool,
+        /// Path to the secret key file
+        #[arg(long)]
+        key_path: Option<PathBuf>,
         /// Maximum number of connected players
         #[arg(long)]
         max_players: Option<u32>,
-        /// Share URI refresh policy; defaults to the saved policy (always)
-        #[arg(short = 't', long = "time", value_enum, value_name = "TIME")]
-        token_refresh: Option<TokenRefresh>,
-        /// Generate a new Share URI for this host start
-        #[arg(short = 'f', long = "force")]
-        force_fresh: bool,
     },
     /// Join a room with a share URI
     Join {
@@ -137,7 +143,7 @@ enum Commands {
         /// Local port for the Minecraft client
         #[arg(short, long)]
         port: Option<std::num::NonZeroU16>,
-        /// Path status interval in seconds; 0 reports changes only
+        /// Path status interval in seconds
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
         /// Maximum reconnection attempts; unlimited by default
@@ -180,7 +186,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             delay,
             max_players,
             token_refresh,
-            force_fresh,
+            new_uri,
         } => {
             let path = match key_path {
                 Some(path) => path,
@@ -207,15 +213,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
                 .event_delay(Duration::from_secs(delay))
                 .max_players(max_players);
 
-            run_host(
-                port,
-                secret_key,
-                relay_url,
-                config,
-                token_refresh,
-                force_fresh,
-            )
-            .await?;
+            run_host(port, secret_key, relay_url, config, token_refresh, new_uri).await?;
         }
         Commands::Join {
             join_uri,
@@ -286,7 +284,7 @@ async fn run_host(
     relay_url: Option<sculk::tunnel::RelayUrl>,
     config: HostConfig,
     token_refresh: TokenRefresh,
-    force_fresh: bool,
+    new_uri: bool,
 ) -> anyhow::Result<()> {
     let state_path = persist::default_host_state_path()?;
     let saved_state = persist::load_host_state(&state_path)?;
@@ -301,7 +299,7 @@ async fn run_host(
         port,
         config,
         token_refresh,
-        force_fresh,
+        new_uri,
         saved_state,
         &state_path,
     )
@@ -323,14 +321,14 @@ async fn run_host_until_shutdown(
     port: u16,
     config: HostConfig,
     token_refresh: TokenRefresh,
-    force_fresh: bool,
+    new_uri: bool,
     saved_state: Option<HostState>,
     state_path: &std::path::Path,
 ) -> anyhow::Result<()> {
     let service_id = saved_state
         .as_ref()
         .map_or_else(ServiceId::generate, |state| state.service_id);
-    let token_state = if force_fresh {
+    let token_state = if new_uri {
         None
     } else {
         saved_state.map(|state| state.token_state)
@@ -559,7 +557,7 @@ mod tests {
             Ok(Cli {
                 command: Commands::Host {
                     token_refresh: None,
-                    force_fresh: false,
+                    new_uri: false,
                     ..
                 }
             })
@@ -567,18 +565,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_host_force_fresh() {
-        for flag in ["-f", "--force"] {
-            let cli = Cli::try_parse_from(["sculk", "host", flag]);
-            assert!(matches!(
-                cli,
-                Ok(Cli {
-                    command: Commands::Host {
-                        force_fresh: true,
-                        ..
-                    }
-                })
-            ));
-        }
+    fn parse_host_new_uri() {
+        let cli = Cli::try_parse_from(["sculk", "host", "--new-uri"]);
+        assert!(matches!(
+            cli,
+            Ok(Cli {
+                command: Commands::Host { new_uri: true, .. }
+            })
+        ));
     }
 }
