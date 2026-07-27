@@ -99,10 +99,17 @@ pub(super) async fn auth_accept(conn: &Connection) -> crate::Result<(SendStream,
         auth_respond(&mut send, false).await?;
         return Err(crate::error::TunnelError::AuthRejectedByHost.into());
     }
-    let data = recv
-        .read_to_end(CONTROL_REQUEST_LEN)
-        .await
-        .map_err(|e| crate::error::TunnelError::ReadAuthPayload(e.into()))?;
+    let data = tokio::select! {
+        biased;
+        extra = conn.accept_bi() => {
+            extra.map_err(|e| crate::error::TunnelError::AcceptAuthStream(e.into()))?;
+            auth_respond(&mut send, false).await?;
+            return Err(crate::error::TunnelError::AuthRejectedByHost.into());
+        }
+        data = recv.read_to_end(CONTROL_REQUEST_LEN) => {
+            data.map_err(|e| crate::error::TunnelError::ReadAuthPayload(e.into()))?
+        }
+    };
     if data.len() != CONTROL_REQUEST_LEN || data[0] != CONTROL_VERSION {
         auth_respond(&mut send, false).await?;
         return Err(crate::error::TunnelError::AuthRejectedByHost.into());

@@ -878,6 +878,8 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
     async fn recv_status_where(
         updates: &mut HostedServiceStatusSubscription,
         predicate: impl Fn(&HostedServiceStatus) -> bool,
@@ -1174,6 +1176,116 @@ mod tests {
             );
         }
         node.close().await;
+    }
+
+    #[tokio::test]
+    async fn rejects_additional_stream_before_authentication() -> TestResult {
+        let node = SculkNode::bind(NodeOptions::default()).await?;
+        let client = build_endpoint(None, None).bind().await?;
+        let conn = client.connect(node.inner.endpoint.addr(), ALPN).await?;
+        let (_control_send, _control_recv) = conn.open_bi().await?;
+        let (mut extra_send, _extra_recv) = conn.open_bi().await?;
+        extra_send.write_all(b"x").await?;
+        extra_send.finish()?;
+
+        let closed = tokio::time::timeout(Duration::from_secs(3), conn.closed()).await?;
+        assert!(matches!(
+            closed,
+            ConnectionError::ApplicationClosed(ApplicationClose {
+                error_code,
+                ..
+            }) if error_code == CLOSE_AUTH_FAILED
+        ));
+
+        client.close().await;
+        node.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reports_fixed_local_port_conflict() -> TestResult {
+        let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let occupied_addr = occupied.local_addr()?;
+        let node = SculkNode::bind(NodeOptions::default()).await?;
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id: ServiceId::generate(),
+                target_addr: SocketAddr::from(([127, 0, 0, 1], 25565)),
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await?;
+        let uri = service.join_uri().await?;
+
+        let join = IrohTunnel::join_direct(
+            &uri,
+            node.inner.endpoint.addr(),
+            occupied_addr.port(),
+            JoinConfig::default(),
+        )
+        .await;
+        assert_eq!(
+            join.as_ref().err().map(crate::SculkError::category),
+            Some(ErrorCategory::LocalPortUnavailable)
+        );
+        if let Ok((tunnel, _)) = join {
+            tunnel.close().await;
+        }
+        node.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bounds_local_forwarding_sessions() -> TestResult {
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let target_addr = target.local_addr()?;
+        let node = SculkNode::bind(NodeOptions::default()).await?;
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id: ServiceId::generate(),
+                target_addr,
+                token: AccessToken::generate(),
+                token_refresh: None,
+                config: HostConfig::default(),
+            })
+            .await?;
+        let uri = service.join_uri().await?;
+        let (join, _) = IrohTunnel::join_direct(
+            &uri,
+            node.inner.endpoint.addr(),
+            0,
+            JoinConfig::new().local_sessions_max(NonZeroUsize::MIN),
+        )
+        .await?;
+        let Some(local_addr) = join.local_addr() else {
+            join.close().await;
+            node.close().await;
+            return Err(std::io::Error::other("Join listener address is missing").into());
+        };
+
+        let mut first_local = tokio::net::TcpStream::connect(local_addr).await?;
+        first_local.write_all(b"a").await?;
+        let (first_target, _) =
+            tokio::time::timeout(Duration::from_secs(3), target.accept()).await??;
+
+        let mut second_local = tokio::net::TcpStream::connect(local_addr).await?;
+        second_local.write_all(b"b").await?;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), target.accept())
+                .await
+                .is_err(),
+            "second session bypassed the configured limit"
+        );
+
+        drop(first_local);
+        drop(first_target);
+        tokio::time::timeout(Duration::from_secs(3), target.accept()).await??;
+
+        drop(second_local);
+        join.close().await;
+        node.close().await;
+        Ok(())
     }
 
     #[tokio::test]
