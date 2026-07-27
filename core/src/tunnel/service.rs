@@ -13,7 +13,7 @@ use super::{
     AccessToken, ConnectionSnapshot, HostConfig, IrohTunnel, JoinConfig, JoinUri, RelayUrl,
     SecretKey, ServiceId, TunnelEvent,
 };
-use crate::SculkError;
+use crate::{ErrorCategory, SculkError};
 
 const EVENT_BROADCAST_SIZE: usize = 128;
 const STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(200);
@@ -216,6 +216,17 @@ pub enum TunnelServiceError {
     InvalidMaxPlayers,
     #[error(transparent)]
     Tunnel(#[from] SculkError),
+}
+
+impl TunnelServiceError {
+    /// Returns the stable product-level category for this error.
+    pub const fn category(&self) -> ErrorCategory {
+        match self {
+            Self::Busy | Self::NotRunning => ErrorCategory::OperationConflict,
+            Self::InvalidPort | Self::InvalidMaxPlayers => ErrorCategory::InvalidConfiguration,
+            Self::Tunnel(error) => error.category(),
+        }
+    }
 }
 
 /// 托管隧道的统一更新。

@@ -58,7 +58,7 @@ pub mod persist;
 pub mod tunnel;
 pub mod types;
 
-pub use error::{Result, SculkError};
+pub use error::{ErrorCategory, Result, SculkError};
 pub use types::{RelayUrl, SecretKey};
 
 /// Minecraft 服务端标准端口。

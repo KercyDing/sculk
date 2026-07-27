@@ -14,6 +14,7 @@ use super::endpoint::build_endpoint;
 use super::host::{HostContext, start_authenticated_host_connection};
 use super::session::HostSessions;
 use super::*;
+use crate::ErrorCategory;
 use crate::types::{AccessToken, RelayUrl, SecretKey, ServiceId};
 
 const NODE_UNAUTHENTICATED_CONNECTIONS_MAX: NonZeroUsize = NonZeroUsize::new(128).unwrap();
@@ -70,6 +71,19 @@ pub enum SculkNodeError {
     InvalidRefreshPeriod,
     #[error("failed to bind Node endpoint")]
     BindEndpoint(#[source] crate::error::BoxError),
+}
+
+impl SculkNodeError {
+    /// Returns the stable product-level category for this error.
+    pub const fn category(&self) -> ErrorCategory {
+        match self {
+            Self::TargetNotLoopback | Self::InvalidTargetPort | Self::InvalidRefreshPeriod => {
+                ErrorCategory::InvalidConfiguration
+            }
+            Self::DuplicateService | Self::ServiceNotFound => ErrorCategory::OperationConflict,
+            Self::BindEndpoint(_) => ErrorCategory::InvalidEndpoint,
+        }
+    }
 }
 
 /// 单个 iroh Endpoint 上发布多个隔离 Host 服务的 Node。

@@ -7,6 +7,25 @@ use thiserror::Error;
 /// 装箱的错误源类型，用于保留原始错误链。
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+/// Stable error categories for product-level handling.
+///
+/// Detailed error enums and source chains remain available for diagnostics. Applications should
+/// use this category when selecting user-facing recovery actions instead of matching error text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ErrorCategory {
+    InvalidJoinUri,
+    InvalidEndpoint,
+    AuthorizationDenied,
+    HostUnreachable,
+    LocalPortUnavailable,
+    IdentityUnavailable,
+    OperationConflict,
+    ResourceLimit,
+    InvalidConfiguration,
+    Internal,
+}
+
 /// 持久化层错误。
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -157,3 +176,102 @@ impl TunnelError {
 
 /// core crate 统一 `Result` 别名。
 pub type Result<T> = std::result::Result<T, SculkError>;
+
+impl PersistError {
+    /// Returns the stable product-level category for this error.
+    pub const fn category(&self) -> ErrorCategory {
+        match self {
+            Self::RelayUrlParse(_) => ErrorCategory::InvalidEndpoint,
+            Self::SystemDataDirUnavailable
+            | Self::PathIo { .. }
+            | Self::InvalidKeyLength { .. } => ErrorCategory::IdentityUnavailable,
+            #[cfg(feature = "persist")]
+            Self::ProfileParse { .. } | Self::ProfileSerialize(_) => {
+                ErrorCategory::InvalidConfiguration
+            }
+        }
+    }
+}
+
+impl JoinUriError {
+    /// Returns the stable product-level category for this error.
+    pub const fn category(&self) -> ErrorCategory {
+        match self {
+            Self::RelayUrlParse(_) => ErrorCategory::InvalidEndpoint,
+            Self::UrlParse(_)
+            | Self::InvalidStructure
+            | Self::UnsupportedVersion
+            | Self::InvalidPayload
+            | Self::PayloadTooLong
+            | Self::UnsupportedFlags => ErrorCategory::InvalidJoinUri,
+        }
+    }
+}
+
+impl TunnelError {
+    /// Returns the stable product-level category for this error.
+    pub const fn category(&self) -> ErrorCategory {
+        match self {
+            Self::BindLocalListener(_) => ErrorCategory::LocalPortUnavailable,
+            Self::ConnectHostEndpoint(_)
+            | Self::InitialConnectionExhausted { .. }
+            | Self::AuthTimedOut => ErrorCategory::HostUnreachable,
+            Self::AuthRejectedByHost => ErrorCategory::AuthorizationDenied,
+            Self::BindHostEndpoint(_) | Self::BindJoinEndpoint(_) => ErrorCategory::InvalidEndpoint,
+            Self::MutexPoisoned { .. }
+            | Self::AcceptHostConnection(_)
+            | Self::AcceptQuicBiStream(_)
+            | Self::AcceptLocalTcpClient(_)
+            | Self::OpenAuthStream(_)
+            | Self::AcceptAuthStream(_)
+            | Self::ReadAuthResult(_)
+            | Self::ReadAuthPayload(_)
+            | Self::WriteAuthPayload(_)
+            | Self::WriteAuthRejected(_)
+            | Self::WriteAuthDecision(_)
+            | Self::FinishAuthStream(_)
+            | Self::BridgeTcpToQuic(_)
+            | Self::BridgeQuicToTcp(_) => ErrorCategory::Internal,
+        }
+    }
+}
+
+impl SculkError {
+    /// Returns the stable product-level category for this error.
+    pub const fn category(&self) -> ErrorCategory {
+        match self {
+            Self::Persist(error) => error.category(),
+            Self::JoinUri(error) => error.category(),
+            Self::Tunnel(error) => error.category(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_public_errors_to_stable_categories() {
+        assert_eq!(
+            JoinUriError::UnsupportedVersion.category(),
+            ErrorCategory::InvalidJoinUri
+        );
+        assert_eq!(
+            TunnelError::AuthRejectedByHost.category(),
+            ErrorCategory::AuthorizationDenied
+        );
+        assert_eq!(
+            TunnelError::AuthTimedOut.category(),
+            ErrorCategory::HostUnreachable
+        );
+        assert_eq!(
+            PersistError::InvalidKeyLength {
+                expected: 32,
+                actual: 31,
+            }
+            .category(),
+            ErrorCategory::IdentityUnavailable
+        );
+    }
+}

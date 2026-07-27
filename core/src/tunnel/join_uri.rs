@@ -47,17 +47,17 @@ impl JoinUri {
     }
 
     /// 返回目标 EndpointId。
-    pub fn endpoint_id(&self) -> EndpointId {
+    pub(crate) fn endpoint_id(&self) -> EndpointId {
         self.endpoint_id
     }
 
     /// 返回目标服务标识。
-    pub fn service_id(&self) -> ServiceId {
+    pub(crate) fn service_id(&self) -> ServiceId {
         self.service_id
     }
 
     /// 返回 Join 时需要发送的访问令牌。
-    pub fn token(&self) -> &AccessToken {
+    pub(crate) fn token(&self) -> &AccessToken {
         &self.token
     }
 
@@ -203,14 +203,46 @@ mod tests {
         )
     }
 
+    fn encoded_payload(payload: Vec<u8>) -> String {
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
+        format!("{SCHEME}://{HOST}/{VERSION}/{encoded}")
+    }
+
+    fn base_payload() -> Vec<u8> {
+        let uri = join_uri(None).expose_secret_uri();
+        assert!(uri.is_ok(), "fixed Join URI must encode");
+        let Ok(uri) = uri else {
+            unreachable!();
+        };
+        let Some(encoded) = uri.rsplit('/').next() else {
+            unreachable!();
+        };
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded);
+        assert!(payload.is_ok(), "fixed payload must decode");
+        payload.unwrap_or_default()
+    }
+
+    #[test]
+    fn encodes_stable_v1_test_vector() {
+        let uri = join_uri(None);
+        let value = uri.expose_secret_uri();
+        assert!(value.is_ok(), "fixed Join URI must encode");
+        let value = value.unwrap_or_default();
+        assert_eq!(
+            value,
+            concat!(
+                "sculk://join/v1/",
+                "AOpKbGPinFIKvvVQexMuxfmVR3auvr57kkIe6mkURtIs",
+                "CAgICAgICAgICAgICAgICAkJCQkJCQkJCQkJCQkJCQkJ",
+                "CQkJCQkJCQkJCQkJCQkJ"
+            )
+        );
+    }
+
     #[test]
     fn roundtrips_fixed_binary_payload() {
         let uri = join_uri(None);
-        let value = uri.expose_secret_uri();
-        assert!(value.is_ok());
-        let value = value.unwrap_or_default();
-        assert!(value.starts_with("sculk://join/v1/"));
-        assert!(value.len() <= URI_LEN_MAX);
+        let value = uri.expose_secret_uri().unwrap_or_default();
 
         let parsed: Result<JoinUri, _> = value.parse();
         assert!(parsed.is_ok());
@@ -232,5 +264,136 @@ mod tests {
         let value = join_uri(None).expose_secret_uri().unwrap_or_default();
         assert!(format!("{value}?x=1").parse::<JoinUri>().is_err());
         assert!(format!("{value}#x").parse::<JoinUri>().is_err());
+    }
+
+    #[test]
+    fn rejects_legacy_and_unknown_versions() {
+        let endpoint_id = join_uri(None).endpoint_id();
+        let legacy = format!("sculk://{endpoint_id}");
+        assert!(matches!(
+            legacy.parse::<JoinUri>(),
+            Err(JoinUriError::InvalidStructure)
+        ));
+
+        let payload = base_payload();
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
+        let unknown = format!("sculk://join/v2/{encoded}");
+        assert!(matches!(
+            unknown.parse::<JoinUri>(),
+            Err(JoinUriError::UnsupportedVersion)
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_flags_and_trailing_data() {
+        let mut unknown_flags = base_payload();
+        unknown_flags[0] = 0b1000_0000;
+        assert!(matches!(
+            encoded_payload(unknown_flags).parse::<JoinUri>(),
+            Err(JoinUriError::UnsupportedFlags)
+        ));
+
+        let mut trailing = base_payload();
+        trailing.push(0);
+        assert!(matches!(
+            encoded_payload(trailing).parse::<JoinUri>(),
+            Err(JoinUriError::InvalidPayload)
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_payload_lengths() {
+        let payload = base_payload();
+        assert!(matches!(
+            encoded_payload(Vec::new()).parse::<JoinUri>(),
+            Err(JoinUriError::InvalidStructure)
+        ));
+        for len in [1, PAYLOAD_BASE_LEN - 1] {
+            assert!(matches!(
+                encoded_payload(payload[..len].to_vec()).parse::<JoinUri>(),
+                Err(JoinUriError::InvalidPayload)
+            ));
+        }
+
+        let mut relay_missing_length = payload.clone();
+        relay_missing_length[0] = FLAG_RELAY;
+        assert!(matches!(
+            encoded_payload(relay_missing_length).parse::<JoinUri>(),
+            Err(JoinUriError::InvalidPayload)
+        ));
+
+        let mut relay_length_mismatch = payload;
+        relay_length_mismatch[0] = FLAG_RELAY;
+        relay_length_mismatch.extend_from_slice(&[2, b'a']);
+        assert!(matches!(
+            encoded_payload(relay_length_mismatch).parse::<JoinUri>(),
+            Err(JoinUriError::InvalidPayload)
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_relay_text() {
+        let mut empty_relay = base_payload();
+        empty_relay[0] = FLAG_RELAY;
+        empty_relay.push(0);
+        assert!(matches!(
+            encoded_payload(empty_relay).parse::<JoinUri>(),
+            Err(JoinUriError::InvalidPayload)
+        ));
+
+        let mut invalid_utf8 = base_payload();
+        invalid_utf8[0] = FLAG_RELAY;
+        invalid_utf8.extend_from_slice(&[1, 0xff]);
+        assert!(matches!(
+            encoded_payload(invalid_utf8).parse::<JoinUri>(),
+            Err(JoinUriError::InvalidPayload)
+        ));
+
+        let mut invalid_url = base_payload();
+        invalid_url[0] = FLAG_RELAY;
+        invalid_url.extend_from_slice(&[3, b'b', b'a', b'd']);
+        assert!(matches!(
+            encoded_payload(invalid_url).parse::<JoinUri>(),
+            Err(JoinUriError::RelayUrlParse(_))
+        ));
+    }
+
+    #[test]
+    fn enforces_uri_and_relay_limits() {
+        let prefix = "https://relay.example/";
+        let relay_max = format!("{prefix}{}", "a".repeat(RELAY_LEN_MAX - prefix.len()));
+        assert_eq!(relay_max.len(), RELAY_LEN_MAX);
+        let relay = relay_max.parse::<RelayUrl>();
+        assert!(relay.is_ok(), "maximum relay URL must parse");
+        let Some(relay) = relay.ok() else {
+            unreachable!();
+        };
+        let encoded = join_uri(Some(relay)).expose_secret_uri();
+        assert!(encoded.is_ok(), "maximum relay URL must encode");
+        assert!(encoded.is_ok_and(|value| value.len() <= URI_LEN_MAX));
+
+        let relay_too_long = format!("{relay_max}a").parse::<RelayUrl>();
+        assert!(relay_too_long.is_ok(), "oversized relay URL must parse");
+        let Some(relay_too_long) = relay_too_long.ok() else {
+            unreachable!();
+        };
+        assert!(matches!(
+            join_uri(Some(relay_too_long)).expose_secret_uri(),
+            Err(JoinUriError::PayloadTooLong)
+        ));
+
+        let oversized = format!("sculk://join/v1/{}", "a".repeat(URI_LEN_MAX));
+        assert!(matches!(
+            oversized.parse::<JoinUri>(),
+            Err(JoinUriError::PayloadTooLong)
+        ));
+    }
+
+    #[test]
+    fn debug_output_redacts_access_token() {
+        let uri = join_uri(None);
+        let debug = format!("{uri:?}");
+        assert!(debug.contains("AccessToken(REDACTED)"));
+        assert!(!debug.contains("09090909"));
     }
 }
