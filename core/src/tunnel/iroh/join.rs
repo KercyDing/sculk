@@ -7,6 +7,8 @@ use super::monitor::spawn_path_monitor;
 use super::transport::bridge;
 use crate::types::{AccessToken, ServiceId};
 
+const RECONNECT_PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Join 重连 supervisor 的运行时上下文。
 pub(super) struct JoinContext {
     pub(super) listener: Arc<TcpListener>,
@@ -64,69 +66,72 @@ pub(super) async fn reconnect_supervisor(
             return;
         }
 
-        if ctx.config.max_retries == Some(0) {
+        if ctx.config.reconnect_timeout == Some(Duration::ZERO) {
             return;
         }
 
-        let mut attempt: u32 = 0;
-        let reconnected = loop {
-            attempt = attempt.saturating_add(1);
-
-            if let Some(max) = ctx.config.max_retries
-                && attempt > max
-            {
-                super::emit_event(
-                    &tx,
-                    TunnelEvent::Error {
-                        category: crate::ErrorCategory::HostUnreachable,
-                        message: format!("max retries ({max}) exceeded, giving up"),
-                    },
-                );
-                return;
+        let mut progress = tokio::time::interval_at(
+            tokio::time::Instant::now() + RECONNECT_PROGRESS_INTERVAL,
+            RECONNECT_PROGRESS_INTERVAL,
+        );
+        progress.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let reconnect_timeout = async {
+            match ctx.config.reconnect_timeout {
+                Some(timeout) => tokio::time::sleep(timeout).await,
+                None => std::future::pending().await,
             }
+        };
+        tokio::pin!(reconnect_timeout);
+        let mut attempt: u32 = 1;
+        super::emit_event(&tx, TunnelEvent::Reconnecting { attempt });
+        tracing::info!(attempt, "reconnecting...");
 
-            let backoff = std::cmp::min(
-                ctx.config
-                    .base_backoff
-                    .saturating_mul(2u32.saturating_pow(attempt - 1)),
-                ctx.config.max_backoff,
+        let reconnected = 'reconnect: loop {
+            let reconnect = reconnect_once(
+                &endpoint,
+                &endpoint_addr,
+                ctx.service_id,
+                &ctx.token,
+                attempt,
             );
+            tokio::pin!(reconnect);
 
-            super::emit_event(&tx, TunnelEvent::Reconnecting { attempt });
-
-            tracing::info!(attempt, ?backoff, "reconnecting...");
-
-            // backoff sleep 期间响应关闭信号
-            tokio::select! {
-                _ = tokio::time::sleep(backoff) => {}
-                _ = super::wait_for_shutdown(&mut ctx.shutdown) => return,
-            }
-
-            if *ctx.shutdown.borrow() {
-                return;
-            }
-
-            match endpoint.connect(endpoint_addr.clone(), ALPN).await {
-                Ok(new_conn) => {
-                    if let Err(e) = auth_send(&new_conn, ctx.service_id, &ctx.token).await {
-                        tracing::warn!(attempt, "reconnect auth failed: {e}");
-                        if is_permanent_auth_error(&e, &new_conn) {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = super::wait_for_shutdown(&mut ctx.shutdown) => return,
+                    _ = &mut reconnect_timeout => {
+                        publish_reconnect_timeout(&tx, ctx.config.reconnect_timeout);
+                        return;
+                    }
+                    outcome = &mut reconnect => match outcome {
+                        ReconnectOutcome::Connected(new_conn) => break 'reconnect new_conn,
+                        ReconnectOutcome::Rejected(message) => {
                             super::emit_event(
                                 &tx,
                                 TunnelEvent::Error {
                                     category: crate::ErrorCategory::AuthorizationDenied,
-                                    message: format!("reconnect rejected: {e}"),
+                                    message,
                                 },
                             );
                             return;
                         }
-                        continue;
+                        ReconnectOutcome::Retry => break,
+                    },
+                    _ = progress.tick() => {
+                        advance_reconnect_progress(&mut attempt, &tx);
                     }
-                    break new_conn;
                 }
-                Err(e) => {
-                    tracing::warn!(attempt, "reconnect failed: {e}");
-                    continue;
+            }
+
+            tokio::select! {
+                _ = super::wait_for_shutdown(&mut ctx.shutdown) => return,
+                _ = &mut reconnect_timeout => {
+                    publish_reconnect_timeout(&tx, ctx.config.reconnect_timeout);
+                    return;
+                }
+                _ = progress.tick() => {
+                    advance_reconnect_progress(&mut attempt, &tx);
                 }
             }
         };
@@ -157,6 +162,53 @@ pub(super) async fn reconnect_supervisor(
         super::emit_event(&tx, TunnelEvent::Reconnected);
         tracing::info!("reconnected successfully");
     }
+}
+
+enum ReconnectOutcome {
+    Connected(Connection),
+    Retry,
+    Rejected(String),
+}
+
+async fn reconnect_once(
+    endpoint: &Endpoint,
+    endpoint_addr: &iroh::EndpointAddr,
+    service_id: ServiceId,
+    token: &AccessToken,
+    attempt: u32,
+) -> ReconnectOutcome {
+    let new_conn = match endpoint.connect(endpoint_addr.clone(), ALPN).await {
+        Ok(new_conn) => new_conn,
+        Err(error) => {
+            tracing::warn!(attempt, "reconnect failed: {error}");
+            return ReconnectOutcome::Retry;
+        }
+    };
+    if let Err(error) = auth_send(&new_conn, service_id, token).await {
+        tracing::warn!(attempt, "reconnect auth failed: {error}");
+        if is_permanent_auth_error(&error, &new_conn) {
+            return ReconnectOutcome::Rejected(format!("reconnect rejected: {error}"));
+        }
+        return ReconnectOutcome::Retry;
+    }
+    ReconnectOutcome::Connected(new_conn)
+}
+
+fn advance_reconnect_progress(attempt: &mut u32, tx: &mpsc::Sender<TunnelEvent>) {
+    *attempt = attempt.saturating_add(1);
+    super::emit_event(tx, TunnelEvent::Reconnecting { attempt: *attempt });
+    tracing::info!(attempt = *attempt, "reconnect pending...");
+}
+
+fn publish_reconnect_timeout(tx: &mpsc::Sender<TunnelEvent>, reconnect_timeout: Option<Duration>) {
+    let timeout = reconnect_timeout.unwrap_or_default();
+    super::emit_event(
+        tx,
+        TunnelEvent::Error {
+            category: crate::ErrorCategory::HostUnreachable,
+            message: format!("reconnect timed out after {} seconds", timeout.as_secs()),
+        },
+    );
 }
 
 /// 启动 join accept loop。
@@ -302,11 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn service_stop_is_retryable_for_legacy_and_current_close_codes() {
-        assert!(!is_permanent_rejection(&application_close(
-            CLOSE_AUTH_FAILED,
-            b"service stopped",
-        )));
+    fn service_stop_is_retryable() {
         assert!(!is_permanent_rejection(&application_close(
             CLOSE_HOST_STOPPED,
             b"service stopped",

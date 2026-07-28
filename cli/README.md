@@ -36,7 +36,7 @@ sculk join "sculk://join/v1/<payload>"
 
 Options:
 - `-p <PORT>` — Optional local inbound listen port (default: automatic)
-- `--max-retries <N>` — Max reconnection attempts (omit for unlimited)
+- `--reconnect-timeout <SECONDS>` — Reconnect timeout (default: 30; 0 for unlimited)
 
 ### Relay Configuration
 
@@ -85,7 +85,7 @@ sculk join "sculk://join/v1/<payload>"
 
 常用参数：
 - `-p <PORT>` — 可选本地入站监听端口（默认自动分配）
-- `--max-retries <N>` — 最大重连次数（不传=无限）
+- `--reconnect-timeout <秒>` — 重连等待时间（默认 30；0 表示无限）
 
 #### 中继配置
 

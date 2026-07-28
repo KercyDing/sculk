@@ -51,7 +51,7 @@
 //!
 //! - `HostConfig::max_players` 按唯一 `EndpointId` 计数。
 //! - 分享 URI 包含当前会话访问令牌，不应写入日志或持久化配置。
-//! - `join` 侧是否自动重连由 `JoinConfig::max_retries` 控制。
+//! - `join` 侧的自动重连等待时间由 `JoinConfig::reconnect_timeout` 控制。
 //! - 简单集成优先使用 `TunnelService`；需要直接拥有事件接收端时使用 `IrohTunnel`。
 
 pub mod error;

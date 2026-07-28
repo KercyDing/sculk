@@ -76,13 +76,13 @@ impl Default for HostConfig {
 pub struct JoinConfig {
     /// `PathChanged` 发送策略：`ZERO` 仅变化时发送，非零按间隔发送。
     pub event_delay: Duration,
-    /// 最大重连次数：`None` 无限，`Some(0)` 关闭重连。
-    pub max_retries: Option<u32>,
+    /// 断线后的最长重连等待时间；`None` 表示无限等待，`Some(Duration::ZERO)` 关闭重连。
+    pub reconnect_timeout: Option<Duration>,
     /// 首次连接的重试上限，默认 3 次。
     pub initial_retries: u32,
-    /// 重连初始退避。
+    /// 首次连接的初始重试退避。
     pub base_backoff: Duration,
-    /// 重连最大退避。
+    /// 首次连接的最大重试退避。
     pub max_backoff: Duration,
     /// 同时处理的本地 TCP 转发会话上限。
     pub local_sessions_max: NonZeroUsize,
@@ -98,8 +98,8 @@ impl JoinConfig {
         self
     }
 
-    pub fn max_retries(mut self, max_retries: Option<u32>) -> Self {
-        self.max_retries = max_retries;
+    pub fn reconnect_timeout(mut self, reconnect_timeout: Option<Duration>) -> Self {
+        self.reconnect_timeout = reconnect_timeout;
         self
     }
 
@@ -114,7 +114,7 @@ impl Default for JoinConfig {
     fn default() -> Self {
         Self {
             event_delay: Duration::ZERO,
-            max_retries: None,
+            reconnect_timeout: Some(Duration::from_secs(30)),
             initial_retries: 3,
             base_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
