@@ -147,8 +147,8 @@ enum Commands {
         #[arg(short, long, default_value_t = 0)]
         delay: u64,
         /// Reconnect timeout in seconds; 0 means unlimited
-        #[arg(long, default_value_t = 30)]
-        reconnect_timeout: u64,
+        #[arg(short = 't', long = "timeout", default_value_t = 0)]
+        timeout: u64,
     },
     /// Manage the relay configuration
     #[command(arg_required_else_help = true)]
@@ -219,7 +219,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             join_uri,
             port,
             delay,
-            reconnect_timeout,
+            timeout,
         } => {
             let service = TunnelService::new();
             let mut updates = service.subscribe();
@@ -230,9 +230,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
 
             let config = JoinConfig::new()
                 .event_delay(Duration::from_secs(delay))
-                .reconnect_timeout(
-                    (reconnect_timeout != 0).then_some(Duration::from_secs(reconnect_timeout)),
-                );
+                .reconnect_timeout((timeout != 0).then_some(Duration::from_secs(timeout)));
 
             service
                 .start_join(

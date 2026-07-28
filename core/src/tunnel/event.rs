@@ -114,7 +114,7 @@ impl Default for JoinConfig {
     fn default() -> Self {
         Self {
             event_delay: Duration::ZERO,
-            reconnect_timeout: Some(Duration::from_secs(30)),
+            reconnect_timeout: None,
             initial_retries: 3,
             base_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
