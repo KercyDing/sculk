@@ -5,6 +5,8 @@
 //!
 //! # Overview
 //!
+//! - [`minecraft::probe_server`]：探测本机 Minecraft Java 版服务。
+//! - [`minecraft::lan`]：扫描原版 LAN 公告或向本机客户端发布隧道入口。
 //! - [`tunnel::IrohTunnel`]：创建 host 或 join 隧道。
 //! - [`tunnel::TunnelService`]：托管单条隧道的生命周期、状态与多调用方事件订阅。
 //! - [`tunnel::JoinUri`]：`sculk://join/v1/` 分享 URI。
@@ -53,6 +55,7 @@
 //! - 简单集成优先使用 `TunnelService`；需要直接拥有事件接收端时使用 `IrohTunnel`。
 
 pub mod error;
+pub mod minecraft;
 #[cfg(feature = "persist")]
 pub mod persist;
 pub mod tunnel;

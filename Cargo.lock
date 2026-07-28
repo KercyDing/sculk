@@ -2836,6 +2836,7 @@ dependencies = [
  "iroh",
  "rand",
  "serde",
+ "socket2",
  "subtle",
  "thiserror 2.0.19",
  "tokio",
