@@ -8,7 +8,7 @@ use super::auth::auth_verify;
 use super::monitor::spawn_path_monitor;
 use super::node::HostedStatus;
 use super::session::HostSessions;
-use super::transport::bridge;
+use super::transport::{bridge, is_connection_closed};
 use crate::types::{AccessToken, ServiceId};
 
 const CONNECTION_ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -303,6 +303,10 @@ async fn host_handle_conn(
             let _bridge = status.as_ref().map(|status| status.bridge_started());
 
             if let Err(e) = bridge(send, recv, tcp).await {
+                if is_connection_closed(&e) {
+                    tracing::debug!("stream closed: {e}");
+                    return;
+                }
                 if let Some(status) = &status {
                     status.set_error(crate::ErrorCategory::Internal);
                 }
