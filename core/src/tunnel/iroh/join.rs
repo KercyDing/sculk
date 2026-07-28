@@ -182,7 +182,7 @@ fn spawn_join_accept_loop(
 /// 判断是否为不应重连的拒绝类型。
 fn is_permanent_rejection(err: &ConnectionError) -> bool {
     if let ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }) = err {
-        *error_code == CLOSE_AUTH_FAILED || *error_code == CLOSE_SERVER_FULL
+        is_auth_failure_close(err) || *error_code == CLOSE_SERVER_FULL
     } else {
         false
     }
@@ -293,6 +293,41 @@ async fn join_accept_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn application_close(error_code: VarInt, reason: &'static [u8]) -> ConnectionError {
+        ConnectionError::ApplicationClosed(ApplicationClose {
+            error_code,
+            reason: reason.into(),
+        })
+    }
+
+    #[test]
+    fn service_stop_is_retryable_for_legacy_and_current_close_codes() {
+        assert!(!is_permanent_rejection(&application_close(
+            CLOSE_AUTH_FAILED,
+            b"service stopped",
+        )));
+        assert!(!is_permanent_rejection(&application_close(
+            CLOSE_HOST_STOPPED,
+            b"service stopped",
+        )));
+        assert!(!is_permanent_rejection(&application_close(
+            CLOSE_HOST_STOPPED,
+            b"node stopped",
+        )));
+    }
+
+    #[test]
+    fn authentication_and_capacity_rejections_remain_permanent() {
+        assert!(is_permanent_rejection(&application_close(
+            CLOSE_AUTH_FAILED,
+            CLOSE_AUTH_FAILED_REASON,
+        )));
+        assert!(is_permanent_rejection(&application_close(
+            CLOSE_SERVER_FULL,
+            b"server full",
+        )));
+    }
 
     #[test]
     fn auth_rejection_stops_retry() {

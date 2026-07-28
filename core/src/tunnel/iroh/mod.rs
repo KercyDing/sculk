@@ -45,9 +45,19 @@ const EVENT_CHANNEL_SIZE: usize = 64;
 const CLOSE_AUTH_FAILED: VarInt = VarInt::from_u32(1);
 const CLOSE_SERVER_FULL: VarInt = VarInt::from_u32(2);
 const CLOSE_REPLACED_BY_RECONNECT: VarInt = VarInt::from_u32(3);
+const CLOSE_HOST_STOPPED: VarInt = VarInt::from_u32(4);
+const CLOSE_AUTH_FAILED_REASON: &[u8] = b"auth failed";
 const REJECT_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 const FULL_RECHECK_DELAY: Duration = Duration::from_millis(1500);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn is_auth_failure_close(err: &ConnectionError) -> bool {
+    matches!(
+        err,
+        ConnectionError::ApplicationClosed(ApplicationClose { error_code, reason })
+            if *error_code == CLOSE_AUTH_FAILED && reason.as_ref() == CLOSE_AUTH_FAILED_REASON
+    )
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct TrackedConnection {

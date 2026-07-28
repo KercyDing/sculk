@@ -110,7 +110,12 @@ async fn start_host_connection(
                     id: remote_id.clone(),
                 },
             );
-            spawn_rejected_conn_cleanup(conn, CLOSE_AUTH_FAILED, b"auth failed", remote_id);
+            spawn_rejected_conn_cleanup(
+                conn,
+                CLOSE_AUTH_FAILED,
+                CLOSE_AUTH_FAILED_REASON,
+                remote_id,
+            );
             Ok(())
         }
     }

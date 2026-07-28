@@ -489,7 +489,7 @@ impl SculkNode {
             .map_err(|_| SculkNodeError::ServiceNotFound)?;
         for tracked in conns.drain(..) {
             if let Some(conn) = tracked.handle.upgrade() {
-                conn.close(CLOSE_AUTH_FAILED, b"service stopped");
+                conn.close(CLOSE_HOST_STOPPED, b"service stopped");
             }
         }
         service.status.set_phase(HostedServicePhase::Stopped);
@@ -625,7 +625,7 @@ impl SculkNode {
             if let Ok(mut conns) = service.context.conns.lock() {
                 for tracked in conns.drain(..) {
                     if let Some(conn) = tracked.handle.upgrade() {
-                        conn.close(CLOSE_AUTH_FAILED, b"node stopped");
+                        conn.close(CLOSE_HOST_STOPPED, b"node stopped");
                     }
                 }
             }
@@ -952,7 +952,7 @@ async fn route_connection(node: &SculkNode, conn: Connection) -> crate::Result<(
     let (mut send, request) = match auth_accept(&conn).await {
         Ok(value) => value,
         Err(_) => {
-            conn.close(CLOSE_AUTH_FAILED, b"auth failed");
+            conn.close(CLOSE_AUTH_FAILED, CLOSE_AUTH_FAILED_REASON);
             return Ok(());
         }
     };
@@ -972,7 +972,7 @@ async fn route_connection(node: &SculkNode, conn: Connection) -> crate::Result<(
     };
     auth_respond(&mut send, valid).await?;
     let Some(service) = service.filter(|_| valid) else {
-        conn.close(CLOSE_AUTH_FAILED, b"auth failed");
+        conn.close(CLOSE_AUTH_FAILED, CLOSE_AUTH_FAILED_REASON);
         return Ok(());
     };
     start_authenticated_host_connection(
@@ -1470,6 +1470,53 @@ mod tests {
 
         join.close().await;
         node.close().await;
+    }
+
+    #[tokio::test]
+    async fn join_reconnects_after_service_republished_with_same_uri() -> TestResult {
+        let node = SculkNode::bind(NodeOptions::default()).await?;
+        let service_id = ServiceId::generate();
+        let target_addr = SocketAddr::from(([127, 0, 0, 1], 25565));
+        let service = node
+            .start_service(HostedServiceOptions {
+                service_id,
+                target_addr,
+                token_state: None,
+                token_refresh: TokenRefreshPolicy::Never,
+                config: HostConfig::default(),
+            })
+            .await?;
+        let uri = service.join_uri().await?;
+        let token_state = service.token_state().await?;
+        let (join, mut events) = join_node(&node, &uri).await?;
+
+        node.stop_service(service_id).await?;
+        node.start_service(HostedServiceOptions {
+            service_id,
+            target_addr,
+            token_state: Some(token_state),
+            token_refresh: TokenRefreshPolicy::Never,
+            config: HostConfig::default(),
+        })
+        .await?;
+
+        let reconnected = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut reconnecting = false;
+            while let Some(event) = events.recv().await {
+                match event {
+                    TunnelEvent::Reconnecting { .. } => reconnecting = true,
+                    TunnelEvent::Reconnected => return reconnecting,
+                    _ => {}
+                }
+            }
+            false
+        })
+        .await?;
+        assert!(reconnected, "join did not reconnect after service restart");
+
+        join.close().await;
+        node.close().await;
+        Ok(())
     }
 
     #[test]

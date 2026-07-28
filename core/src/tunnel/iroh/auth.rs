@@ -45,13 +45,11 @@ async fn auth_send_inner(
     let result = match recv.read_to_end(1).await {
         Ok(result) => result,
         Err(error) => {
-            if matches!(
-                conn.close_reason(),
-                Some(ConnectionError::ApplicationClosed(ApplicationClose {
-                    error_code,
-                    ..
-                })) if error_code == CLOSE_AUTH_FAILED
-            ) {
+            if conn
+                .close_reason()
+                .as_ref()
+                .is_some_and(is_auth_failure_close)
+            {
                 return Err(crate::error::TunnelError::AuthRejectedByHost.into());
             }
             return Err(crate::error::TunnelError::ReadAuthResult(error.into()).into());
