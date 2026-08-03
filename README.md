@@ -7,7 +7,7 @@
 
 一个面向 Minecraft 联机的 P2P 隧道项目，基于 iroh/QUIC。
 
-客户端程序在这里 → [shrieker](https://github.com/KercyDing/shrieker)
+客户端程序在这里 → [SeaLantern-Connect](https://github.com/SeaLantern-Studio/SeaLantern-Connect)
 
 > Sculk（幽匿）是 Minecraft 深暗之域中悄然蔓延的脉络，无声地在节点间传递信号。
 >

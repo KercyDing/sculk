@@ -7,7 +7,7 @@
 
 A P2P tunnel for playing Minecraft over the Internet, built with iroh and QUIC.
 
-The GUI client is available here → [shrieker](https://github.com/KercyDing/shrieker)
+The GUI client is available here → [SeaLantern-Connect](https://github.com/SeaLantern-Studio/SeaLantern-Connect)
 
 > Sculk silently spreads through Minecraft's Deep Dark, carrying signals between its nodes.
 >
