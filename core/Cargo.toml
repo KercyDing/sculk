@@ -38,8 +38,5 @@ dirs = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 
-[dev-dependencies]
-rand.workspace = true
-
 [lints]
 workspace = true
