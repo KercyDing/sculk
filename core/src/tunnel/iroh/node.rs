@@ -406,13 +406,21 @@ impl SculkNode {
             self.inner.relay_url.clone(),
         )
         .expose_secret_uri()?;
-        let session_generation = self
-            .inner
-            .service_session_next
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |generation| {
-                generation.checked_add(1)
-            })
-            .map_err(|_| SculkNodeError::SessionGenerationExhausted)?;
+        let session_generation = loop {
+            let generation = self.inner.service_session_next.load(Ordering::Relaxed);
+            let next_generation = generation
+                .checked_add(1)
+                .ok_or(SculkNodeError::SessionGenerationExhausted)?;
+            match self.inner.service_session_next.compare_exchange_weak(
+                generation,
+                next_generation,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break generation,
+                Err(_) => continue,
+            }
+        };
         let (events_tx, mut events_rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let (updates_tx, _) = broadcast::channel(EVENT_CHANNEL_SIZE);
         let (rotation_tx, rotation_rx) = watch::channel(0_u64);
