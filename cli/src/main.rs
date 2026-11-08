@@ -288,12 +288,14 @@ async fn run_host(
 ) -> anyhow::Result<()> {
     let state_path = persist::default_host_state_path()?;
     let saved_state = persist::load_host_state(&state_path)?;
+    println!("Connecting to relay...");
     let node = SculkNode::bind(NodeOptions {
         secret_key: Some(secret_key),
         relay_url,
         ..NodeOptions::default()
     })
     .await?;
+    println!("Relay connected.");
     let result = run_host_until_shutdown(
         &node,
         port,
