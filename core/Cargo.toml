@@ -22,6 +22,7 @@ version.workspace = true
 [features]
 default = []
 persist = ["dep:dirs", "dep:serde", "dep:toml"]
+e2e = []
 
 [dependencies]
 futures-util.workspace = true
@@ -40,6 +41,12 @@ toml = { workspace = true, optional = true }
 
 [dev-dependencies]
 iroh = { workspace = true, features = ["test-utils"] }
+iroh-relay = { version = "1.4", features = ["server"] }
+
+[[test]]
+name = "e2e"
+path = "e2e/main.rs"
+required-features = ["e2e"]
 
 [lints]
 workspace = true
