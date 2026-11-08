@@ -1,0 +1,10 @@
+enable_relay = true
+enable_quic_addr_discovery = true
+http_bind_addr = "0.0.0.0:3341"
+
+[tls]
+cert_mode = "Manual"
+https_bind_addr = "0.0.0.0:3340"
+quic_bind_addr = "0.0.0.0:7842"
+manual_cert_path = "/certs/cert.pem"
+manual_key_path = "/certs/key.pem"

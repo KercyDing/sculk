@@ -1,0 +1,40 @@
+name: NAT
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nat
+
+      - name: Run NAT and QAD tests
+        run: docker/nat/run.sh
+
+      - name: Upload NAT logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nat-logs
+          path: docker/nat/run
+          if-no-files-found: ignore
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker/nat/compose.yml down -v --remove-orphans

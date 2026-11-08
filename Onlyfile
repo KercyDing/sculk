@@ -36,6 +36,12 @@ e2e() ? @has("cargo-nextest"):
 e2e():
     cargo test -p sculk --features e2e --test e2e
 
+[help] Run Docker NAT and QAD tests
+[pass] NAT tests passed.
+[fail] NAT tests failed.
+nat() ? @has("docker"):
+    ./docker/nat/run.sh
+
 [help] Run the full test suite
 [pass] Tests passed.
 [fail] Tests failed.
