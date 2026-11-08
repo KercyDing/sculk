@@ -34,6 +34,11 @@ impl From<iroh::RelayUrl> for RelayUrl {
 pub struct SecretKey(pub(crate) iroh::SecretKey);
 
 impl SecretKey {
+    /// 生成新的随机节点密钥。
+    pub fn generate() -> Self {
+        Self(iroh::SecretKey::generate())
+    }
+
     /// 从 32 字节数组创建密钥。
     pub fn from_bytes(bytes: &[u8; 32]) -> Self {
         Self(iroh::SecretKey::from_bytes(bytes))
@@ -157,5 +162,13 @@ mod tests {
 
         assert_ne!(service_a, service_b);
         assert!(!token_a.matches(&token_b));
+    }
+
+    #[test]
+    fn generated_secret_keys_are_not_reused() {
+        let key_a = SecretKey::generate();
+        let key_b = SecretKey::generate();
+
+        assert_ne!(key_a.to_bytes(), key_b.to_bytes());
     }
 }
