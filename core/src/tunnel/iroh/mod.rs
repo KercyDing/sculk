@@ -63,6 +63,7 @@ fn is_auth_failure_close(err: &ConnectionError) -> bool {
 pub(super) struct TrackedConnection {
     remote_id: EndpointId,
     handle: WeakConnectionHandle,
+    created_at: Instant,
 }
 
 impl TrackedConnection {
@@ -70,6 +71,7 @@ impl TrackedConnection {
         Self {
             remote_id: conn.remote_id(),
             handle: conn.weak_handle(),
+            created_at: Instant::now(),
         }
     }
 
@@ -91,6 +93,7 @@ impl TrackedConnection {
                 rx_bytes: 0,
                 alive: false,
                 elapsed,
+                connected_elapsed: self.created_at.elapsed(),
             };
         };
 
@@ -117,6 +120,7 @@ impl TrackedConnection {
             rx_bytes,
             alive: conn.close_reason().is_none(),
             elapsed,
+            connected_elapsed: self.created_at.elapsed(),
         }
     }
 }
@@ -142,7 +146,7 @@ impl IrohTunnel {
         token: AccessToken,
         config: HostConfig,
     ) -> Result<(Self, JoinUri, mpsc::Receiver<TunnelEvent>)> {
-        let mut builder = build_endpoint(secret_key, relay_url.as_ref());
+        let mut builder = build_endpoint(secret_key, relay_url.as_ref(), config.address_lookup);
         builder = builder.alpns(vec![ALPN.to_vec()]);
         let endpoint = builder
             .bind()
@@ -216,7 +220,7 @@ impl IrohTunnel {
         local_port: u16,
         config: JoinConfig,
     ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
-        let endpoint = build_endpoint(None, join_uri.relay_url())
+        let endpoint = build_endpoint(None, join_uri.relay_url(), config.address_lookup)
             .bind()
             .await
             .map_err(|e| TunnelError::BindJoinEndpoint(e.into()))?;

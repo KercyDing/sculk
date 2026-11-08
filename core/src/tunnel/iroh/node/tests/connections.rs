@@ -144,7 +144,7 @@ async fn rejects_unknown_service_and_wrong_token_identically() {
 #[tokio::test]
 async fn rejects_additional_stream_before_authentication() -> TestResult {
     let node = bind_test_node().await?;
-    let client = build_endpoint(None, local_relay())
+    let client = build_endpoint(None, local_relay(), false)
         .clear_address_lookup()
         .bind()
         .await?;
@@ -389,7 +389,7 @@ async fn bounds_unauthenticated_connections_globally() {
     let Ok(node) = node else {
         return;
     };
-    let client_a = build_endpoint(None, local_relay())
+    let client_a = build_endpoint(None, local_relay(), false)
         .clear_address_lookup()
         .bind()
         .await;

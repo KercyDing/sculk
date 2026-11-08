@@ -43,6 +43,8 @@ pub struct HostConfig {
     pub event_delay: Duration,
     /// 最大玩家数（按唯一 `EndpointId` 计）。
     pub max_players: Option<u32>,
+    /// 是否启用 iroh 的地址查询服务（n0 Pkarr/DNS）。
+    pub address_lookup: bool,
 }
 
 impl HostConfig {
@@ -59,6 +61,12 @@ impl HostConfig {
         self.max_players = max_players;
         self
     }
+
+    /// 关闭 n0 Pkarr/DNS 地址查询；自定义 Relay 下可用于完全离线部署。
+    pub fn address_lookup(mut self, enabled: bool) -> Self {
+        self.address_lookup = enabled;
+        self
+    }
 }
 
 impl Default for HostConfig {
@@ -66,6 +74,7 @@ impl Default for HostConfig {
         Self {
             event_delay: Duration::ZERO,
             max_players: None,
+            address_lookup: true,
         }
     }
 }
@@ -86,6 +95,8 @@ pub struct JoinConfig {
     pub max_backoff: Duration,
     /// 同时处理的本地 TCP 转发会话上限。
     pub local_sessions_max: NonZeroUsize,
+    /// 是否启用 iroh 的地址查询服务（n0 Pkarr/DNS）。
+    pub address_lookup: bool,
 }
 
 impl JoinConfig {
@@ -108,6 +119,12 @@ impl JoinConfig {
         self.local_sessions_max = local_sessions_max;
         self
     }
+
+    /// 关闭 n0 Pkarr/DNS 地址查询；自定义 Relay 下可用于完全离线部署。
+    pub fn address_lookup(mut self, enabled: bool) -> Self {
+        self.address_lookup = enabled;
+        self
+    }
 }
 
 impl Default for JoinConfig {
@@ -119,6 +136,7 @@ impl Default for JoinConfig {
             base_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
             local_sessions_max: DEFAULT_LOCAL_SESSIONS_MAX,
+            address_lookup: true,
         }
     }
 }
@@ -183,4 +201,6 @@ pub struct ConnectionSnapshot {
     pub alive: bool,
     /// 快照采样时刻，距隧道创建的经过时间。
     pub elapsed: Duration,
+    /// 连接建立后经过的时间。
+    pub connected_elapsed: Duration,
 }

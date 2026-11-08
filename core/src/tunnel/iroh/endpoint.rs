@@ -75,6 +75,7 @@ fn relay_unavailable(
 pub(super) fn build_endpoint(
     secret_key: Option<SecretKey>,
     relay_url: Option<&RelayUrl>,
+    address_lookup: bool,
 ) -> iroh::endpoint::Builder {
     let mut builder = Endpoint::builder(iroh::endpoint::presets::N0);
     if let Some(key) = secret_key {
@@ -83,6 +84,9 @@ pub(super) fn build_endpoint(
     if let Some(url) = relay_url {
         let relay_map = RelayMap::from(url.0.clone());
         builder = builder.relay_mode(RelayMode::Custom(relay_map));
+    }
+    if !address_lookup {
+        builder = builder.clear_address_lookup();
     }
     #[cfg(feature = "insecure-relay-tls")]
     {
@@ -105,7 +109,7 @@ mod tests {
             return;
         };
         let relay = RelayUrl(relay);
-        let Ok(host) = build_endpoint(None, Some(&relay))
+        let Ok(host) = build_endpoint(None, Some(&relay), false)
             .ca_tls_config(CaTlsConfig::insecure_skip_verify())
             .clear_address_lookup()
             .alpns(vec![TEST_ALPN.to_vec()])
@@ -114,7 +118,7 @@ mod tests {
         else {
             return;
         };
-        let Ok(join) = build_endpoint(None, Some(&relay))
+        let Ok(join) = build_endpoint(None, Some(&relay), false)
             .ca_tls_config(CaTlsConfig::insecure_skip_verify())
             .clear_address_lookup()
             .alpns(vec![TEST_ALPN.to_vec()])

@@ -32,6 +32,8 @@ pub struct NodeOptions {
     pub relay_url: Option<RelayUrl>,
     /// 同时等待控制流认证的连接上限。
     pub unauthenticated_connections_max: NonZeroUsize,
+    /// 是否启用 iroh 的地址查询服务（n0 Pkarr/DNS）。
+    pub address_lookup: bool,
 }
 
 impl Default for NodeOptions {
@@ -40,6 +42,7 @@ impl Default for NodeOptions {
             secret_key: None,
             relay_url: None,
             unauthenticated_connections_max: NODE_UNAUTHENTICATED_CONNECTIONS_MAX,
+            address_lookup: true,
         }
     }
 }
@@ -353,7 +356,11 @@ impl Drop for HostedBridgeGuard {
 impl SculkNode {
     /// 创建 Node 并立即开始接受新连接。
     pub async fn bind(options: NodeOptions) -> std::result::Result<Self, SculkNodeError> {
-        let mut builder = build_endpoint(options.secret_key, options.relay_url.as_ref());
+        let mut builder = build_endpoint(
+            options.secret_key,
+            options.relay_url.as_ref(),
+            options.address_lookup,
+        );
         builder = builder.alpns(vec![ALPN.to_vec()]);
         let endpoint = builder
             .bind()

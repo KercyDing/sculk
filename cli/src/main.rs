@@ -6,7 +6,7 @@
 //! - `sculk relay`: manage custom relay configuration
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -135,6 +135,9 @@ enum Commands {
         /// Maximum number of connected players
         #[arg(long)]
         max_players: Option<u32>,
+        /// Disable n0 Pkarr/DNS address lookup
+        #[arg(long)]
+        no_address_lookup: bool,
     },
     /// Join a room with a share URI
     Join {
@@ -149,6 +152,12 @@ enum Commands {
         /// Reconnect timeout in seconds; 0 means unlimited
         #[arg(short = 't', long = "timeout", default_value_t = 0)]
         timeout: u64,
+        /// Disable n0 Pkarr/DNS address lookup
+        #[arg(long)]
+        no_address_lookup: bool,
+        /// Write the latest tunnel status to this file
+        #[arg(long)]
+        status_file: Option<PathBuf>,
     },
     /// Manage the relay configuration
     #[command(arg_required_else_help = true)]
@@ -187,6 +196,7 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             max_players,
             token_refresh,
             new_uri,
+            no_address_lookup,
         } => {
             let path = match key_path {
                 Some(path) => path,
@@ -211,7 +221,8 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             };
             let config = HostConfig::new()
                 .event_delay(Duration::from_secs(delay))
-                .max_players(max_players);
+                .max_players(max_players)
+                .address_lookup(!no_address_lookup);
 
             run_host(port, secret_key, relay_url, config, token_refresh, new_uri).await?;
         }
@@ -220,17 +231,21 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             port,
             delay,
             timeout,
+            no_address_lookup,
+            status_file,
         } => {
             let service = TunnelService::new();
             let mut updates = service.subscribe();
             let join_uri: JoinUri = join_uri.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
-            if let Some(url) = join_uri.relay_url() {
+            let relay_url = join_uri.relay_url().map(ToString::to_string);
+            if let Some(url) = &relay_url {
                 println!("Relay: {url}");
             }
 
             let config = JoinConfig::new()
                 .event_delay(Duration::from_secs(delay))
-                .reconnect_timeout((timeout != 0).then_some(Duration::from_secs(timeout)));
+                .reconnect_timeout((timeout != 0).then_some(Duration::from_secs(timeout)))
+                .address_lookup(!no_address_lookup);
 
             service
                 .start_join(
@@ -240,6 +255,9 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
                 )
                 .await?;
             let status = wait_until_active(&mut updates, TunnelMode::Join).await?;
+            if let Some(path) = &status_file {
+                write_status_file(path, &status, relay_url.as_deref())?;
+            }
             let local_addr = status
                 .state
                 .local_addr
@@ -247,7 +265,13 @@ async fn run_command(cli: Cli) -> anyhow::Result<()> {
             println!("Tunnel running. Connect MC client to {local_addr}");
             println!("Press Ctrl+C to stop.");
 
-            wait_for_shutdown(&service, updates).await?;
+            wait_for_shutdown(
+                &service,
+                updates,
+                status_file.as_deref(),
+                relay_url.as_deref(),
+            )
+            .await?;
         }
         Commands::Relay { url, list, reset } => {
             let mut profile = Profile::load()?;
@@ -292,6 +316,7 @@ async fn run_host(
     let node = SculkNode::bind(NodeOptions {
         secret_key: Some(secret_key),
         relay_url,
+        address_lookup: config.address_lookup,
         ..NodeOptions::default()
     })
     .await?;
@@ -445,9 +470,43 @@ async fn wait_until_active(
     anyhow::bail!("tunnel service closed before becoming active")
 }
 
+fn write_status_file(
+    path: &Path,
+    status: &TunnelStatus,
+    relay_url: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut out = String::new();
+    if let Some(url) = relay_url {
+        out.push_str("relay_url=");
+        out.push_str(url);
+        out.push('\n');
+    }
+    if status.connections.is_empty() {
+        out.push_str("is_relay=unknown\n");
+    }
+    for conn in &status.connections {
+        out.push_str(&format!(
+            "is_relay={} rtt_ms={} tx_bytes={} rx_bytes={} alive={} elapsed_ms={} connected_ms={}\n",
+            conn.is_relay,
+            conn.rtt_ms,
+            conn.tx_bytes,
+            conn.rx_bytes,
+            conn.alive,
+            conn.elapsed.as_millis(),
+            conn.connected_elapsed.as_millis()
+        ));
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, out)?;
+    std::fs::rename(tmp, path)?;
+    Ok(())
+}
+
 async fn wait_for_shutdown(
     service: &TunnelService,
     mut updates: TunnelSubscription,
+    status_file: Option<&Path>,
+    relay_url: Option<&str>,
 ) -> anyhow::Result<()> {
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
@@ -463,7 +522,13 @@ async fn wait_for_shutdown(
                 match update {
                     Some(TunnelUpdate::Status(status))
                         if status.state.phase == TunnelPhase::Idle => break,
-                    Some(TunnelUpdate::Status(_)) => {}
+                    Some(TunnelUpdate::Status(status)) => {
+                        if let Some(path) = status_file
+                            && let Err(error) = write_status_file(path, &status, relay_url)
+                        {
+                            eprintln!("[!] Failed to write status file: {error}");
+                        }
+                    }
                     Some(TunnelUpdate::Event(event)) => print_event(&event),
                     Some(_) => {}
                     None => break,
