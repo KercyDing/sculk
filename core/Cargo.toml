@@ -38,5 +38,8 @@ dirs = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 
+[dev-dependencies]
+iroh = { workspace = true, features = ["test-utils"] }
+
 [lints]
 workspace = true

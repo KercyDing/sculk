@@ -200,13 +200,7 @@ impl IrohTunnel {
         local_port: u16,
         config: JoinConfig,
     ) -> Result<(Self, mpsc::Receiver<TunnelEvent>)> {
-        Self::join_to(
-            join_uri,
-            iroh::EndpointAddr::from(join_uri.endpoint_id()),
-            local_port,
-            config,
-        )
-        .await
+        Self::join_to(join_uri, join_endpoint_addr(join_uri), local_port, config).await
     }
 
     async fn join_to(
@@ -314,6 +308,16 @@ impl IrohTunnel {
     }
 }
 
+/// 构造 Join 目标地址。Join URI 带 Relay 时一并作为远端路径提示，
+/// 使连接无需等待地址发现即可经 Relay 建立；地址查询仍会在后台补充直连路径。
+fn join_endpoint_addr(join_uri: &JoinUri) -> iroh::EndpointAddr {
+    let addr = iroh::EndpointAddr::from(join_uri.endpoint_id());
+    match join_uri.relay_url() {
+        Some(relay_url) => addr.with_relay_url(relay_url.0.clone()),
+        None => addr,
+    }
+}
+
 impl Drop for IrohTunnel {
     fn drop(&mut self) {
         let _ = self.shutdown.send(true);
@@ -372,6 +376,37 @@ mod tests {
             rx.try_recv(),
             Err(mpsc::error::TryRecvError::Empty)
         ));
+    }
+
+    #[test]
+    fn join_addr_uses_relay_hint() {
+        let Ok(relay) = "https://relay.example.com".parse::<RelayUrl>() else {
+            return;
+        };
+        let uri = JoinUri::new(
+            iroh::SecretKey::from_bytes(&[7; 32]).public(),
+            ServiceId::generate(),
+            AccessToken::generate(),
+            Some(relay.clone()),
+        );
+
+        let addr = join_endpoint_addr(&uri);
+        assert_eq!(addr.id, uri.endpoint_id());
+        assert_eq!(addr.relay_urls().next(), Some(&relay.0));
+    }
+
+    #[test]
+    fn join_addr_without_relay_has_only_id() {
+        let uri = JoinUri::new(
+            iroh::SecretKey::from_bytes(&[8; 32]).public(),
+            ServiceId::generate(),
+            AccessToken::generate(),
+            None,
+        );
+
+        let addr = join_endpoint_addr(&uri);
+        assert_eq!(addr.id, uri.endpoint_id());
+        assert!(addr.is_empty());
     }
 
     #[tokio::test]
