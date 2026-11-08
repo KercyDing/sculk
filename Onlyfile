@@ -50,3 +50,9 @@ test():
 [fail] Formatting failed.
 fmt():
     cargo fmt --all
+
+[help] Clean build artifacts
+[pass] Cleaned.
+[fail] Clean failed.
+clean():
+    cargo clean
