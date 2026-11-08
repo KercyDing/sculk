@@ -84,6 +84,10 @@ pub(super) fn build_endpoint(
         let relay_map = RelayMap::from(url.0.clone());
         builder = builder.relay_mode(RelayMode::Custom(relay_map));
     }
+    #[cfg(feature = "insecure-relay-tls")]
+    {
+        builder = builder.ca_tls_config(iroh::tls::CaTlsConfig::insecure_skip_verify());
+    }
     builder
 }
 

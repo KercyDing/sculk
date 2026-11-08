@@ -23,6 +23,8 @@ version.workspace = true
 default = []
 persist = ["dep:dirs", "dep:serde", "dep:toml"]
 e2e = []
+# Test-only: trust the local self-signed Relay certificate for Docker/QAD tests.
+insecure-relay-tls = ["iroh/test-utils"]
 
 [dependencies]
 futures-util.workspace = true
