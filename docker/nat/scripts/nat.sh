@@ -42,4 +42,16 @@ iptables -A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A FORWARD -s "$lan_subnet" -i "$lan_if" -o "$wan_if" -j ACCEPT
 iptables -A FORWARD -d "$lan_subnet" -i "$wan_if" -o "$lan_if" -j ACCEPT
 
+netem_args=""
+if [ -n "${NETEM_DELAY:-}" ]; then
+    netem_args="delay ${NETEM_DELAY}"
+fi
+if [ -n "${NETEM_LOSS:-}" ]; then
+    netem_args="${netem_args} loss ${NETEM_LOSS}"
+fi
+if [ -n "$netem_args" ]; then
+    tc qdisc replace dev "$wan_if" root netem $netem_args
+    tc qdisc replace dev "$lan_if" root netem $netem_args
+fi
+
 exec sleep infinity

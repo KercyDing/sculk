@@ -30,6 +30,8 @@ services:
       net.ipv4.ip_forward: "1"
     environment:
       BLOCK_DIRECT: ${BLOCK_DIRECT:-1}
+      NETEM_DELAY: ${NETEM_DELAY:-}
+      NETEM_LOSS: ${NETEM_LOSS:-}
     networks:
       lan_a:
         ipv4_address: 172.30.1.254
@@ -44,6 +46,8 @@ services:
       net.ipv4.ip_forward: "1"
     environment:
       BLOCK_DIRECT: ${BLOCK_DIRECT:-1}
+      NETEM_DELAY: ${NETEM_DELAY:-}
+      NETEM_LOSS: ${NETEM_LOSS:-}
     networks:
       lan_b:
         ipv4_address: 172.30.2.254
@@ -56,6 +60,7 @@ services:
     cap_add: [NET_ADMIN]
     environment:
       RELAY_URL: https://172.30.0.10:3340/
+      ADDRESS_LOOKUP: ${ADDRESS_LOOKUP:-1}
     networks:
       lan_a:
         ipv4_address: 172.30.1.10
@@ -67,6 +72,8 @@ services:
     cap_add: [NET_ADMIN]
     environment:
       EXPECTED_PATH: ${EXPECTED_PATH:-relay}
+      ADDRESS_LOOKUP: ${ADDRESS_LOOKUP:-1}
+      FAULT: ${FAULT:-none}
     networks:
       lan_b:
         ipv4_address: 172.30.2.10

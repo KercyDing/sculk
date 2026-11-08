@@ -79,13 +79,17 @@ run_case() {
     mode="$1"
     block_direct="$2"
     expected_path="$3"
+    address_lookup="$4"
+    netem_delay="${5:-}"
+    netem_loss="${6:-}"
 
     rm -rf docker/nat/run
     mkdir -p docker/nat/run
 
     echo
-    echo "==> ${mode}: BLOCK_DIRECT=${block_direct}, expected path=${expected_path}"
-    EXPECTED_PATH="$expected_path" BLOCK_DIRECT="$block_direct" $compose up -d --force-recreate
+    echo "==> ${mode}: BLOCK_DIRECT=${block_direct}, ADDRESS_LOOKUP=${address_lookup}, netem=${netem_delay}/${netem_loss}, expected path=${expected_path}"
+    EXPECTED_PATH="$expected_path" BLOCK_DIRECT="$block_direct" ADDRESS_LOOKUP="$address_lookup" \
+        FAULT=none NETEM_DELAY="$netem_delay" NETEM_LOSS="$netem_loss" $compose up -d --force-recreate
 
     for _ in $(seq 1 90); do
         [ -s docker/nat/run/result ] && break
@@ -115,7 +119,68 @@ run_case() {
     echo "PASS: ${mode}"
 }
 
+run_fault_case() {
+    mode="$1"
+    fault="$2"
+    block_direct="$3"
+
+    rm -rf docker/nat/run
+    mkdir -p docker/nat/run
+
+    echo
+    echo "==> ${mode}: fault=${fault}, BLOCK_DIRECT=${block_direct}"
+    EXPECTED_PATH=any BLOCK_DIRECT="$block_direct" ADDRESS_LOOKUP=1 FAULT="$fault" \
+        NETEM_DELAY= NETEM_LOSS= $compose up -d --force-recreate
+
+    for _ in $(seq 1 90); do
+        [ -s docker/nat/run/ready ] && break
+        sleep 1
+    done
+    if [ ! -s docker/nat/run/ready ]; then
+        echo "FAIL: ${mode} did not become ready"
+        return 1
+    fi
+
+    case "$fault" in
+        relay-restart)
+            $compose stop relay
+            sleep 35
+            $compose start relay
+            ;;
+        network-drop)
+            $compose exec -T nat-a iptables -I FORWARD -j DROP
+            sleep 35
+            $compose exec -T nat-a iptables -D FORWARD -j DROP
+            ;;
+        *)
+            echo "FAIL: unknown fault ${fault}"
+            return 1
+            ;;
+    esac
+    echo restored > docker/nat/run/restored
+
+    for _ in $(seq 1 90); do
+        [ -s docker/nat/run/result ] && break
+        sleep 1
+    done
+
+    result=$(cat docker/nat/run/result 2>/dev/null || echo timeout)
+    path=$(cat docker/nat/run/path 2>/dev/null || echo unknown)
+    echo "result=${result} path=${path}"
+    echo "--- join log ---"
+    tail -n 40 docker/nat/run/join.log 2>/dev/null || true
+    if [ "$result" != "pass" ]; then
+        echo "FAIL: ${mode} did not recover (result=${result})"
+        return 1
+    fi
+    echo "PASS: ${mode}"
+}
+
 status=0
-run_case "relay-only" 1 relay || status=1
-run_case "holepunch" 0 direct || status=1
+run_case "relay-only" 1 relay 1 || status=1
+run_case "holepunch" 0 direct 1 || status=1
+run_case "holepunch-no-lookup" 0 direct 0 || status=1
+run_case "relay-lossy" 1 relay 1 "20ms" "2%" || status=1
+run_fault_case "relay-restart" "relay-restart" 1 || status=1
+run_fault_case "network-drop" "network-drop" 0 || status=1
 exit "$status"

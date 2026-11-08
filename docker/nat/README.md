@@ -1,6 +1,6 @@
 # Docker NAT / QAD 测试
 
-在单机上用 Docker 模拟两个局域网、两个 NAT Router 和一个公网 Relay，验证 sculk 在 Relay-only 和 UDP 打洞两种网络下的 TCP 转发。
+在单机上用 Docker 模拟两个局域网、两个 NAT Router 和一个公网 Relay，验证 sculk 在 Relay-only、UDP 打洞、丢包、Relay 故障和断网恢复下的 TCP 转发。
 
 ## 网络拓扑
 
@@ -14,7 +14,7 @@ LAN B 172.30.2.0/24 ── nat-b ──┘
 
 - `host`：LAN A，本地跑 TCP echo 服务，并通过 `sculk host` 发布；
 - `join`：LAN B，读取共享目录里的 `sculk://` URI，执行 `sculk join`，再发 TCP 数据；
-- `nat-a`、`nat-b`：Linux Router，做 IPv4 转发、MASQUERADE 和防火墙；
+- `nat-a`、`nat-b`：Linux Router，做 IPv4 转发、MASQUERADE、严格 FORWARD 规则和可选 `tc netem`；
 - `relay`：`iroh-relay`，启用 TLS 和 QUIC Address Discovery（QAD）。
 
 ## 运行
@@ -29,7 +29,7 @@ LAN B 172.30.2.0/24 ── nat-b ──┘
 2. 如果本地没有 `iroh-relay`，从 `KercyDing/iroh-relay` release 下载；
 3. 为 `172.30.0.10` 生成自签证书；
 4. 构建测试镜像；
-5. 依次运行 `relay-only` 和 `holepunch`。
+5. 依次运行下面的用例。
 
 `run.sh` 默认从 `Cargo.lock` 读取 `iroh-relay` 的版本；如果需要指定其他版本，可以用 `RELAY_VERSION` 覆盖。
 
@@ -37,21 +37,76 @@ Docker builder 使用了 BuildKit cache mount，第一次构建较慢，之后�
 
 ## 用例
 
-| 用例 | NAT 规则 | 预期路径 |
+| 用例 | 网络条件 | 预期 |
 |---|---|---|
-| `relay-only` | 丢弃两端 NAT 公网 IP 之间的 UDP | `relay` |
-| `holepunch` | 允许直连 UDP | `direct` |
+| `relay-only` | 阻断两端 NAT 公网 IP 之间的 UDP | 路径 `relay`，TCP 正常 |
+| `holepunch` | 允许直连 UDP | 路径 `direct`，TCP 正常 |
+| `holepunch-no-lookup` | `ADDRESS_LOOKUP=0`，允许直连 UDP | 仍然 `direct`，证明不依赖 n0 lookup |
+| `relay-lossy` | Relay-only + `tc netem` 20ms 延迟 / 2% 丢包 | 路径 `relay`，TCP 仍能完成 |
+| `relay-restart` | Relay-only，Relay 停止 35s 后恢复 | 出现 `Reconnecting` / `Reconnected`，TCP 恢复 |
+| `network-drop` | 直连正常，nat-a 临时 DROP 全部转发流量 35s | 出现重连，TCP 恢复 |
 
-两个用例都会验证：
+每个用例都会验证：
 
 - `hello` 能经 tunnel 转发到 Host 的 TCP echo 服务并原路返回；
-- CLI 的 `PathChanged` 最终路径符合预期。
+- 当前路径符合预期，或故障恢复后能重新转发。
 
-`relay-only` 靠 Router 里的这条规则阻断直连：
+`relay-only` 和 `relay-lossy` 靠 Router 里的这条规则阻断直连：
 
 ```sh
 iptables -A FORWARD -p udp -d "$peer_wan" -j DROP
 ```
+
+`relay-lossy` 通过以下环境变量注入网络质量：
+
+```text
+NETEM_DELAY=20ms
+NETEM_LOSS=2%
+```
+
+脚本会在 Router 的 WAN / LAN 出口执行 `tc qdisc replace ... netem`。
+
+`relay-restart` / `network-drop` 的故障持续时间是 35 秒，用来超过 QUIC idle timeout，确保触发应用层的重连，而不是被底层透明恢复。
+
+## 路径断言与状态文件
+
+`sculk join` 现在支持：
+
+```sh
+--status-file /shared/status
+```
+
+`join.sh` 读取这个文件里的：
+
+```text
+is_relay=true
+```
+
+或：
+
+```text
+is_relay=false
+```
+
+来断言 `relay` / `direct`，不再依赖解析 `PathChanged` 日志。
+
+## 地址查询开关
+
+Host / Join 都支持：
+
+```sh
+--no-address-lookup
+```
+
+对应配置：
+
+```rust
+HostConfig::new().address_lookup(false)
+JoinConfig::new().address_lookup(false)
+NodeOptions { address_lookup: false, ..Default::default() }
+```
+
+`holepunch-no-lookup` 用这个开关验证：关闭 n0 Pkarr/DNS lookup 后，靠 Relay + QAD + QNT 仍然可以直连。
 
 ## QAD 与 TLS
 
@@ -82,12 +137,12 @@ insecure-relay-tls = ["iroh/test-utils"]
 
 如果 `holepunch` 最终仍停留在 `relay`：
 
-- 查看 `docker/nat/run/join.log` 里的 `PathChanged` 事件；
+- 查看 `docker/nat/run/status` 和 `join.log`；
 - 确认两端能访问 Relay 的 UDP `7842`；
 - 确认两个 NAT Router 允许打洞的返回流量；
 - 检查 `nat-a` / `nat-b` 的 `iptables` 和 `ip_forward` 是否生效。
 
-如果 `run.sh` 失败，会输出 `host.log`、`join.log` 以及 Relay / NAT 的最近日志。
+如果 `run.sh` 失败，会输出 `host.log`、`join.log`、`status` 以及 Relay / NAT 的最近日志。
 
 ## 生成文件
 
@@ -96,12 +151,12 @@ insecure-relay-tls = ["iroh/test-utils"]
 ```text
 docker/nat/bin/     # iroh-relay 二进制
 docker/nat/certs/   # 自签证书
-docker/nat/run/     # URI、日志、测试结果
+docker/nat/run/     # URI、状态、日志、测试结果
 ```
 
 ## 限制
 
 - 只验证 Linux NAT 行为，不能模拟校园网或运营商 CGNAT；
-- 路径断言来自 CLI 的 `PathChanged` 日志，不是直接读取 `ConnectionSnapshot::is_relay`；
-- 目前没有覆盖丢包、延迟、Relay 故障和断线重连；
+- 主路径通过本地 Relay 和 Docker 网络，不覆盖真实公网 Relay 的 TLS/ACL；
+- `network-drop` 只断开一台 Router，不是真实的多路径网络抖动；
 - Docker Router 规则是按当前拓扑写的，新增网络时需要同步调整。
