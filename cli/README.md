@@ -27,6 +27,7 @@ Options:
   `never`, `1h`, `3h`, `6h`, `12h`, or `24h`)
 - `--new-uri` — Generate a new Share URI for this start without changing
   the saved refresh policy
+- `--no-address-lookup` — Disable n0 Pkarr/DNS address lookup
 
 ### Join
 
@@ -37,6 +38,8 @@ sculk join "sculk://join/v1/<payload>"
 Options:
 - `-p <PORT>` — Optional local inbound listen port (default: automatic)
 - `-t, --timeout <SECONDS>` — Reconnect timeout (default: 0, unlimited)
+- `--no-address-lookup` — Disable n0 Pkarr/DNS address lookup
+- `--status-file <PATH>` — Write tunnel status (path, RTT, bytes, timings) to a file
 
 ### Relay Configuration
 

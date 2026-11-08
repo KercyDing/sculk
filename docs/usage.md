@@ -63,6 +63,36 @@ sculk join "sculk://join/v1/<payload>" --port 30000
 
 连接成功后 CLI 会显示一个本地地址；在 Minecraft 的“多人游戏”中添加该地址即可进入。
 
+## 关闭地址查询
+
+如果已经配置了自定义 Relay，可以用：
+
+```sh
+sculk host --no-address-lookup
+sculk join "sculk://join/v1/<payload>" --no-address-lookup
+```
+
+这会关闭 n0 的 Pkarr/DNS 地址查询。Relay 建连仍然依赖 `JoinUri` 里的 Relay URL；直连仍然可以通过 QAD 和连接内的候选地址交换建立。
+
+代价是少了按 EndpointId 发现地址的能力，并且 Relay 不可达时少一种直连兜底。建议只在明确使用自定义 Relay、或希望避免 n0 外部请求时启用。
+
+## 诊断状态文件
+
+Join 侧可以持续写出连接状态：
+
+```sh
+sculk join "sculk://join/v1/<payload>" --status-file ./sculk-status
+```
+
+文件内容类似：
+
+```text
+relay_url=https://relay.example.com/
+is_relay=true rtt_ms=12 tx_bytes=1234 rx_bytes=5678 alive=true elapsed_ms=5000 connected_ms=4200
+```
+
+`is_relay=false` 表示当前是直连。这个文件适合脚本、日志收集和网络问题排查。
+
 ## Relay
 
 ```sh
