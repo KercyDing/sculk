@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn stopping_one_service_keeps_node_and_other_service() {
-    let node_result = SculkNode::bind(NodeOptions::default()).await;
+    let node_result = bind_test_node().await;
     assert!(node_result.is_ok());
     let Ok(node) = node_result else {
         return;
@@ -56,7 +56,7 @@ async fn stopping_one_service_keeps_node_and_other_service() {
     let node_status = node.status().await;
     assert_eq!(node_status.endpoint_id, node.endpoint_id());
     assert!(node_status.online);
-    assert!(node_status.relay_url.is_none());
+    assert!(node_status.relay_url.is_some());
     assert_eq!(node_status.service_count, 2);
     assert_eq!(node_status.unauthenticated_connection_count, 0);
     assert_eq!(
@@ -117,7 +117,7 @@ async fn stopping_one_service_keeps_node_and_other_service() {
 
 #[tokio::test]
 async fn stopping_service_closes_authenticated_connections() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -190,7 +190,7 @@ async fn stopping_service_closes_authenticated_connections() {
 
 #[tokio::test]
 async fn rejects_duplicate_service_ids() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -222,7 +222,7 @@ async fn rejects_duplicate_service_ids() {
 
 #[tokio::test]
 async fn dropping_last_node_handle_closes_endpoint() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;

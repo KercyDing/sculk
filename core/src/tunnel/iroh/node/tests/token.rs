@@ -148,11 +148,9 @@ async fn token_policy_controls_uri_across_node_restarts() {
     let service_id = ServiceId::from_bytes([0x4b; 16]);
     let target_addr = SocketAddr::from(([127, 0, 0, 1], 25565));
 
-    let first = SculkNode::bind(NodeOptions {
-        secret_key: Some(secret_key.clone()),
-        ..NodeOptions::default()
-    })
-    .await;
+    let mut options = test_node_options();
+    options.secret_key = Some(secret_key.clone());
+    let first = SculkNode::bind(options.clone()).await;
     assert!(first.is_ok());
     let Ok(first) = first else {
         return;
@@ -180,11 +178,8 @@ async fn token_policy_controls_uri_across_node_restarts() {
         return;
     };
 
-    let second = SculkNode::bind(NodeOptions {
-        secret_key: Some(secret_key.clone()),
-        ..NodeOptions::default()
-    })
-    .await;
+    options.secret_key = Some(secret_key.clone());
+    let second = SculkNode::bind(options.clone()).await;
     assert!(second.is_ok());
     let Ok(second) = second else {
         return;
@@ -206,11 +201,8 @@ async fn token_policy_controls_uri_across_node_restarts() {
     assert_eq!(never.join_uri().await.ok(), Some(first_uri.clone()));
     second.close().await;
 
-    let third = SculkNode::bind(NodeOptions {
-        secret_key: Some(secret_key),
-        ..NodeOptions::default()
-    })
-    .await;
+    options.secret_key = Some(secret_key);
+    let third = SculkNode::bind(options).await;
     assert!(third.is_ok());
     let Ok(third) = third else {
         return;
@@ -235,7 +227,7 @@ async fn token_policy_controls_uri_across_node_restarts() {
 
 #[tokio::test]
 async fn manual_rotation_resets_automatic_deadline() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -306,7 +298,7 @@ async fn manual_rotation_resets_automatic_deadline() {
 
 #[tokio::test]
 async fn rotation_conflict_preserves_current_uri() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -360,7 +352,7 @@ async fn rotation_conflict_preserves_current_uri() {
 
 #[tokio::test]
 async fn stopped_rotation_task_cannot_modify_republished_service() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -407,7 +399,7 @@ async fn stopped_rotation_task_cannot_modify_republished_service() {
 
 #[tokio::test]
 async fn rotation_failure_updates_status_and_warning_event() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -473,7 +465,7 @@ async fn rotation_failure_updates_status_and_warning_event() {
 
 #[tokio::test]
 async fn rejects_old_uri_after_token_rotation() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;

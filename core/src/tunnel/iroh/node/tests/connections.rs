@@ -25,7 +25,7 @@ async fn joins_and_forwards_to_the_selected_service() {
         }
     });
 
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -104,7 +104,7 @@ async fn joins_and_forwards_to_the_selected_service() {
 
 #[tokio::test]
 async fn rejects_unknown_service_and_wrong_token_identically() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -143,8 +143,11 @@ async fn rejects_unknown_service_and_wrong_token_identically() {
 
 #[tokio::test]
 async fn rejects_additional_stream_before_authentication() -> TestResult {
-    let node = SculkNode::bind(NodeOptions::default()).await?;
-    let client = build_endpoint(None, None).bind().await?;
+    let node = bind_test_node().await?;
+    let client = build_endpoint(None, local_relay())
+        .clear_address_lookup()
+        .bind()
+        .await?;
     let conn = client.connect(node.inner.endpoint.addr(), ALPN).await?;
     let (_control_send, _control_recv) = conn.open_bi().await?;
     let (mut extra_send, _extra_recv) = conn.open_bi().await?;
@@ -169,7 +172,7 @@ async fn rejects_additional_stream_before_authentication() -> TestResult {
 async fn reports_fixed_local_port_conflict() -> TestResult {
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let occupied_addr = occupied.local_addr()?;
-    let node = SculkNode::bind(NodeOptions::default()).await?;
+    let node = bind_test_node().await?;
     let service = node
         .start_service(HostedServiceOptions {
             service_id: ServiceId::generate(),
@@ -203,7 +206,7 @@ async fn reports_fixed_local_port_conflict() -> TestResult {
 async fn bounds_local_forwarding_sessions() -> TestResult {
     let target = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let target_addr = target.local_addr()?;
-    let node = SculkNode::bind(NodeOptions::default()).await?;
+    let node = bind_test_node().await?;
     let service = node
         .start_service(HostedServiceOptions {
             service_id: ServiceId::generate(),
@@ -252,7 +255,7 @@ async fn bounds_local_forwarding_sessions() -> TestResult {
 
 #[tokio::test]
 async fn join_reconnects_after_service_republished_with_same_uri() -> TestResult {
-    let node = SculkNode::bind(NodeOptions::default()).await?;
+    let node = bind_test_node().await?;
     let service_id = ServiceId::generate();
     let target_addr = SocketAddr::from(([127, 0, 0, 1], 25565));
     let service = node
@@ -299,7 +302,7 @@ async fn join_reconnects_after_service_republished_with_same_uri() -> TestResult
 
 #[tokio::test]
 async fn enforces_service_connection_limit() {
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
@@ -379,16 +382,17 @@ async fn enforces_service_connection_limit() {
 
 #[tokio::test]
 async fn bounds_unauthenticated_connections_globally() {
-    let node = SculkNode::bind(NodeOptions {
-        unauthenticated_connections_max: NonZeroUsize::MIN,
-        ..NodeOptions::default()
-    })
-    .await;
+    let mut options = test_node_options();
+    options.unauthenticated_connections_max = NonZeroUsize::MIN;
+    let node = SculkNode::bind(options).await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
     };
-    let client_a = build_endpoint(None, None).bind().await;
+    let client_a = build_endpoint(None, local_relay())
+        .clear_address_lookup()
+        .bind()
+        .await;
     assert!(client_a.is_ok());
     let Ok(client_a) = client_a else {
         node.close().await;
@@ -441,7 +445,7 @@ async fn records_target_connection_failures_in_status() {
         return;
     };
 
-    let node = SculkNode::bind(NodeOptions::default()).await;
+    let node = bind_test_node().await;
     assert!(node.is_ok());
     let Ok(node) = node else {
         return;
