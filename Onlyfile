@@ -1,93 +1,52 @@
 !version 0.5
 
-[help] Internal helper for release builds
-_release_build():
-    cargo build --release --bin sculk
+[help] Build the project in development mode.
+[pass] Build complete!
+[fail] Build failed.
+build():
+    cargo build
+
+[help] Build the project in release mode.
+[pass] Release build complete!
+[fail] Release build failed.
+build-release():
+    cargo build --release
+
+[help] Run formatter, type checks, tests, and e2e
+[pass] CI complete!
+ci()
+    & check
+    & test
+    & e2e
 
 [help] Run cargo check
+[pass] Checks passed.
+[fail] Checks failed.
 check():
     cargo fmt --all -- --check
     cargo check --workspace --all-targets
     cargo clippy --workspace --all-targets -- -D warnings
 
-[help] Run formatter, type checks, and tests
-[pass] CI complete!
-ci() & check & dev.test
+[help] Run end-to-end tests
+[pass] E2E tests passed.
+[fail] E2E tests failed.
+e2e() ? @has("cargo-nextest"):
+    cargo nextest run -p sculk --features e2e --test e2e
 
-[help] Install sculk
-[desc] Install the Windows binary after exit.
-[pass] Installed. Restart your shell.
-[fail] Installation failed.
-install()
-    ? @os("windows")
-    & _release_build
-    shell~=pwsh
-:
-    | # Resolve paths and processes.
-    | $installDir = Join-Path $env:LOCALAPPDATA "Programs\Sculk"
-    | $installPath = Join-Path $installDir "sculk.exe"
-    | $stagedPath = Join-Path $env:TEMP "sculk-install-staged.exe"
-    | $parentPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
-    | $shellPath = (Get-Process -Id $PID).Path
-    |
-    | # Stage the replacement.
-    | New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    | Copy-Item target/release/sculk.exe -Destination $stagedPath -Force
-    | $script = "Wait-Process -Id $parentPid; Copy-Item -LiteralPath '$stagedPath' -Destination '$installPath' -Force; Remove-Item -LiteralPath '$stagedPath' -Force"
-    | $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-    |
-    | # Install after sculk exits.
-    | Start-Process -WindowStyle Hidden -FilePath $shellPath -ArgumentList "-NoProfile", "-EncodedCommand", $encoded
+e2e():
+    cargo test -p sculk --features e2e --test e2e
 
-[desc] Install to ~/.local/bin/sculk.
-[pass] Installed to ~/.local/bin/sculk.
-install() & _release_build:
-    | # Resolve paths.
-    | install_dir="$HOME/.local/bin"
-    | staged_path="$install_dir/.sculk-install"
-    |
-    | # Stage the executable.
-    | mkdir -p "$install_dir"
-    | cp target/release/sculk "$staged_path"
-    | chmod +x "$staged_path"
-    |
-    | # Replace the installed binary.
-    | mv "$staged_path" "$install_dir/sculk"
+[help] Run the full test suite
+[pass] Tests passed.
+[fail] Tests failed.
+test() ? @has("cargo-nextest"):
+    cargo nextest run
 
-[help] Development builds
-group dev {
+test():
+    cargo test
 
-    [help] Build the project in development mode.
-    build():
-        cargo build
-
-    [help] Run the project in development mode
-    run():
-        cargo run
-
-    [help] Run the full test suite
-    test() ? @has("cargo-nextest"):
-        cargo nextest run
-
-    test():
-        cargo test
-}
-
-[help] Release builds
-group rel {
-
-    [help] Build the project in release mode.
-    build():
-        cargo build --release
-
-    [help] Run the project in release mode
-    run():
-        cargo run --release
-
-    [help] Run the release test suite
-    test() ? @has("cargo-nextest"):
-        cargo nextest run --release
-
-    test():
-        cargo test --release
-}
+[help] Format the project
+[pass] Formatted.
+[fail] Formatting failed.
+fmt():
+    cargo fmt --all

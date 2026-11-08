@@ -68,11 +68,9 @@ The workspace contains two crates:
 Common commands:
 
 ```sh
-only check       # Formatting, compilation, and Clippy checks
-only ci          # Checks and development tests
-only dev build   # Development build
-only rel build   # Release build
-only install     # Build and install the sculk CLI
+only build         # Development build
+only build-release # Release build
+only ci            # Checks, unit tests, and e2e
 ```
 
 ## License

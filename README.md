@@ -70,11 +70,9 @@ Workspace 包含两个 crate：
 常用命令：
 
 ```sh
-only check       # 格式、编译与 Clippy 检查
-only ci          # 检查并运行开发测试
-only dev build   # 开发构建
-only rel build   # 发布构建
-only install     # 构建并安装 sculk CLI
+only build         # 开发构建
+only build-release # 发布构建
+only ci            # 检查、单元测试与 e2e
 ```
 
 ## 许可证
