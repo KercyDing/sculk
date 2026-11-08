@@ -149,6 +149,10 @@ impl IrohTunnel {
             .await
             .map_err(|e| TunnelError::BindHostEndpoint(e.into()))?;
         endpoint.online().await;
+        tracing::info!(
+            relay = ?endpoint.addr().relay_urls().collect::<Vec<_>>(),
+            "host endpoint online"
+        );
 
         let join_uri = JoinUri::new(endpoint.id(), service_id, token.clone(), relay_url);
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
@@ -217,6 +221,7 @@ impl IrohTunnel {
         let (tx, rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let conns: Arc<Mutex<Vec<TrackedConnection>>> = Arc::new(Mutex::new(Vec::new()));
 
+        let connect_started = Instant::now();
         let conn = connect_with_retry(
             &endpoint,
             &endpoint_addr,
@@ -226,6 +231,11 @@ impl IrohTunnel {
             &tx,
         )
         .await?;
+        tracing::info!(
+            elapsed_ms = connect_started.elapsed().as_millis() as u64,
+            relay = ?endpoint.addr().relay_urls().collect::<Vec<_>>(),
+            "join connected"
+        );
 
         lock_mutex(&conns, "join connections")?.push(TrackedConnection::new(&conn));
         emit_event(&tx, TunnelEvent::Connected);

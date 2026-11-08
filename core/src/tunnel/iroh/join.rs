@@ -177,6 +177,7 @@ async fn reconnect_once(
     token: &AccessToken,
     attempt: u32,
 ) -> ReconnectOutcome {
+    let connect_started = Instant::now();
     let new_conn = match endpoint.connect(endpoint_addr.clone(), ALPN).await {
         Ok(new_conn) => new_conn,
         Err(error) => {
@@ -184,6 +185,11 @@ async fn reconnect_once(
             return ReconnectOutcome::Retry;
         }
     };
+    tracing::info!(
+        attempt,
+        elapsed_ms = connect_started.elapsed().as_millis() as u64,
+        "reconnect connection established"
+    );
     if let Err(error) = auth_send(&new_conn, service_id, token).await {
         tracing::warn!(attempt, "reconnect auth failed: {error}");
         if is_permanent_auth_error(&error, &new_conn) {
