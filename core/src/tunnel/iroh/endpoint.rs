@@ -1,7 +1,72 @@
 //! iroh `Endpoint` 构建辅助。
 
+use std::time::Duration;
+
 use super::*;
+use crate::error::RelayUnavailable;
+use iroh::Watcher;
 use iroh::{RelayMap, RelayMode};
+
+/// 启动时等待至少一个 home relay 连接成功的最长时间。
+pub(super) const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// 有界等待 Relay 连接；`Endpoint::online` 本身没有超时。
+pub(super) async fn wait_online(
+    endpoint: &Endpoint,
+    configured_relay: Option<&RelayUrl>,
+) -> std::result::Result<(), RelayUnavailable> {
+    wait_online_with(endpoint, configured_relay, RELAY_CONNECT_TIMEOUT).await
+}
+
+async fn wait_online_with(
+    endpoint: &Endpoint,
+    configured_relay: Option<&RelayUrl>,
+    timeout: Duration,
+) -> std::result::Result<(), RelayUnavailable> {
+    let mut watcher = endpoint.home_relay_status();
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        let statuses = watcher.get();
+        if statuses.iter().any(|status| status.is_connected()) {
+            return Ok(());
+        }
+
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(relay_unavailable(&statuses, configured_relay, timeout));
+        }
+
+        match tokio::time::timeout(remaining, watcher.updated()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => return Err(relay_unavailable(&statuses, configured_relay, timeout)),
+            Err(_) => {}
+        }
+    }
+}
+
+fn relay_unavailable(
+    statuses: &[iroh::endpoint::RelayStatus],
+    configured_relay: Option<&RelayUrl>,
+    timeout: Duration,
+) -> RelayUnavailable {
+    let mut relays: Vec<String> = statuses
+        .iter()
+        .map(|status| status.url().to_string())
+        .collect();
+    if relays.is_empty()
+        && let Some(relay) = configured_relay
+    {
+        relays.push(relay.to_string());
+    }
+    let last_error = statuses
+        .iter()
+        .find_map(|status| status.last_error().map(ToString::to_string));
+    let auth_denied = statuses
+        .iter()
+        .find_map(|status| status.auth_denied_reason().map(str::to_string));
+    RelayUnavailable::new(timeout, relays, last_error, auth_denied)
+}
 
 /// 构建 Endpoint，根据参数配置 secret key 和 relay 模式。
 ///
@@ -74,5 +139,28 @@ mod tests {
 
         let accepted = tokio::time::timeout(Duration::from_secs(5), host_task).await;
         assert!(matches!(accepted, Ok(Ok(Some(_)))));
+    }
+
+    #[tokio::test]
+    async fn wait_online_times_out_without_relay() {
+        let Ok(endpoint) = Endpoint::builder(iroh::endpoint::presets::N0DisableRelay)
+            .clear_address_lookup()
+            .bind()
+            .await
+        else {
+            return;
+        };
+
+        let timeout = Duration::from_millis(100);
+        let result = wait_online_with(&endpoint, None, timeout).await;
+        endpoint.close().await;
+
+        assert!(result.is_err(), "wait_online returned before timeout");
+        let Err(error) = result else {
+            return;
+        };
+        assert_eq!(error.timeout(), timeout);
+        assert!(error.relays().is_empty());
+        assert!(error.to_string().contains("default servers"));
     }
 }

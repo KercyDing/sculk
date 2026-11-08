@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::sync::{Mutex as AsyncMutex, RwLock, broadcast, mpsc, watch};
 
 use super::auth::{auth_accept, auth_respond};
-use super::endpoint::build_endpoint;
+use super::endpoint::{build_endpoint, wait_online};
 use super::host::{HostContext, start_authenticated_host_connection};
 use super::session::HostSessions;
 use super::*;
@@ -120,6 +120,9 @@ pub enum SculkNodeError {
     SessionGenerationExhausted,
     #[error(transparent)]
     JoinUri(#[from] crate::error::JoinUriError),
+    /// 等待 Relay 连接超时。
+    #[error(transparent)]
+    RelayUnavailable(#[from] crate::error::RelayUnavailable),
     #[error("failed to bind Node endpoint")]
     BindEndpoint(#[source] crate::error::BoxError),
 }
@@ -136,6 +139,7 @@ impl SculkNodeError {
             }
             Self::SessionGenerationExhausted => ErrorCategory::ResourceLimit,
             Self::JoinUri(error) => error.category(),
+            Self::RelayUnavailable(_) => ErrorCategory::HostUnreachable,
             Self::BindEndpoint(_) => ErrorCategory::InvalidEndpoint,
         }
     }
@@ -355,7 +359,10 @@ impl SculkNode {
             .bind()
             .await
             .map_err(|error| SculkNodeError::BindEndpoint(error.into()))?;
-        endpoint.online().await;
+        if let Err(error) = wait_online(&endpoint, options.relay_url.as_ref()).await {
+            endpoint.close().await;
+            return Err(error.into());
+        }
 
         let (shutdown, shutdown_rx) = watch::channel(false);
         let unauthenticated_connections_max = options.unauthenticated_connections_max.get();

@@ -29,7 +29,7 @@ mod node;
 mod session;
 mod transport;
 
-use endpoint::build_endpoint;
+use endpoint::{build_endpoint, wait_online};
 use host::{HostContext, host_accept_loop};
 use join::{JoinContext, connect_with_retry, reconnect_supervisor};
 use session::HostSessions;
@@ -148,7 +148,10 @@ impl IrohTunnel {
             .bind()
             .await
             .map_err(|e| TunnelError::BindHostEndpoint(e.into()))?;
-        endpoint.online().await;
+        if let Err(error) = wait_online(&endpoint, relay_url.as_ref()).await {
+            endpoint.close().await;
+            return Err(TunnelError::from(error).into());
+        }
         tracing::info!(
             relay = ?endpoint.addr().relay_urls().collect::<Vec<_>>(),
             "host endpoint online"

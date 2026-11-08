@@ -1,11 +1,83 @@
 //! core crate 统一错误类型。
 
+use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
 
 /// 装箱的错误源类型，用于保留原始错误链。
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// 等待 Relay 连接超时。
+///
+/// `Endpoint::online()` 本身没有超时；上层用它给启动流程一个有界等待。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelayUnavailable {
+    timeout: Duration,
+    relays: Vec<String>,
+    last_error: Option<String>,
+    auth_denied: Option<String>,
+}
+
+impl RelayUnavailable {
+    pub(crate) fn new(
+        timeout: Duration,
+        relays: Vec<String>,
+        last_error: Option<String>,
+        auth_denied: Option<String>,
+    ) -> Self {
+        Self {
+            timeout,
+            relays,
+            last_error,
+            auth_denied,
+        }
+    }
+
+    /// 本次等待的超时时间。
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// 等待期间观测到的 Relay 地址。
+    pub fn relays(&self) -> &[String] {
+        &self.relays
+    }
+
+    /// Relay 最近一次连接错误。
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+
+    /// Relay 拒绝认证的原因。
+    pub fn auth_denied(&self) -> Option<&str> {
+        self.auth_denied.as_deref()
+    }
+}
+
+impl fmt::Display for RelayUnavailable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "no relay connection established within {}s",
+            self.timeout.as_secs()
+        )?;
+        if !self.relays.is_empty() {
+            write!(f, "; relay: {}", self.relays.join(", "))?;
+        } else {
+            write!(f, "; relay: default servers")?;
+        }
+        if let Some(reason) = &self.auth_denied {
+            write!(f, "; authentication denied: {reason}")?;
+        } else if let Some(error) = &self.last_error {
+            write!(f, "; last error: {error}")?;
+        }
+        write!(f, "; check network access or configure a reachable relay")
+    }
+}
+
+impl std::error::Error for RelayUnavailable {}
 
 /// Stable error categories for product-level handling.
 ///
@@ -111,6 +183,9 @@ pub enum TunnelError {
     /// 锁中毒。
     #[error("mutex poisoned: {name}")]
     MutexPoisoned { name: &'static str },
+    /// 等待 Relay 连接超时。
+    #[error(transparent)]
+    RelayUnavailable(#[from] RelayUnavailable),
     /// 绑定 host endpoint 失败。
     #[error("bind host endpoint failed")]
     BindHostEndpoint(#[source] BoxError),
@@ -237,7 +312,8 @@ impl TunnelError {
     pub const fn category(&self) -> ErrorCategory {
         match self {
             Self::BindLocalListener(_) => ErrorCategory::LocalPortUnavailable,
-            Self::ConnectHostEndpoint(_)
+            Self::RelayUnavailable(_)
+            | Self::ConnectHostEndpoint(_)
             | Self::InitialConnectionExhausted { .. }
             | Self::AuthTimedOut => ErrorCategory::HostUnreachable,
             Self::AuthRejectedByHost => ErrorCategory::AuthorizationDenied,
