@@ -13,8 +13,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-15-intel]
-    runs-on: ${{ matrix.os }}
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+          - runner: windows-latest
+            arch: x86_64
+          - runner: windows-11-arm
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -25,9 +37,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: check-${{ matrix.os }}
+          key: check-${{ matrix.runner }}
 
-      - if: matrix.os == 'ubuntu-latest'
+      - if: matrix.runner == 'ubuntu-latest'
         run: cargo fmt --all -- --check
 
       - run: cargo check --workspace
@@ -40,8 +52,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-15-intel]
-    runs-on: ${{ matrix.os }}
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+          - runner: windows-latest
+            arch: x86_64
+          - runner: windows-11-arm
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,7 +75,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.os }}
+          key: test-${{ matrix.runner }}
 
       - run: cargo test --workspace
 
